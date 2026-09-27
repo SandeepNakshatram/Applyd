@@ -1,0 +1,247 @@
+// Applyd V1 data model.
+// Design notes:
+// - OAuth tokens are NEVER stored on ConnectedAccount directly. They live in
+//   EmailAccountSecret (encrypted at rest, app-layer AES-GCM) and are referenced
+//   by id via ConnectedAccount.accessTokenReference / refreshTokenReference so
+//   the token values never need to flow through the same model the frontend
+//   ever queries.
+// - ApplicationEvent.emailId is unique per provider account: a given inbound
+//   email can only ever produce one event, which is how we deduplicate.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase: DATABASE_URL is the pooled (pgbouncer) connection used at
+  // runtime; DIRECT_URL is the direct connection Prisma needs for migrations.
+  directUrl = env("DIRECT_URL")
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  ASSESSMENT
+  INTERVIEW
+  OFFER
+  REJECTED
+  WITHDRAWN
+}
+
+enum ApplicationSource {
+  LINKEDIN
+  NAUKRI
+  REFERRAL
+  COMPANY_WEBSITE
+  OTHER
+}
+
+enum EmailEventType {
+  APPLICATION_CONFIRMATION
+  APPLICATION_STATUS_UPDATE
+  SCREENING
+  ASSESSMENT
+  INTERVIEW
+  REJECTION
+  OFFER
+  RECRUITER_OUTREACH
+  JOB_ALERT
+  IRRELEVANT
+}
+
+enum ReviewState {
+  NONE
+  PENDING
+  CONFIRMED
+  IGNORED
+}
+
+enum NotificationType {
+  NEW_APPLICATION
+  STATUS_CHANGE
+  FOLLOW_UP_DUE
+  REVIEW_NEEDED
+}
+
+enum EmailProviderType {
+  GMAIL
+}
+
+enum ScanStage {
+  CONNECTING
+  SCANNING_EMAILS
+  IDENTIFYING_JOB_EMAILS
+  EXTRACTING_INFO
+  MATCHING_APPLICATIONS
+  BUILDING_TIMELINES
+  CREATING_NOTIFICATIONS
+  COMPLETE
+  FAILED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connectedAccounts ConnectedAccount[]
+  applications      Application[]
+  notifications     Notification[]
+  scanJobs          ScanJob[]
+
+  @@map("users")
+}
+
+/// Public-safe record of a linked mailbox. Never carries raw tokens.
+model ConnectedAccount {
+  id                    String            @id @default(cuid())
+  userId                String
+  provider              EmailProviderType
+  providerAccountId     String
+  emailAddress          String
+  accessTokenReference  String            @unique
+  refreshTokenReference String?           @unique
+  scopes                String[]
+  historyId             String?
+  lastSyncedAt          DateTime?
+  status                String            @default("ACTIVE") // ACTIVE | DISCONNECTED
+  disconnectedAt        DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessSecret   EmailAccountSecret? @relation("accessSecret")
+  refreshSecret  EmailAccountSecret? @relation("refreshSecret")
+  processedEmails ProcessedEmail[]
+  scanJobs        ScanJob[]
+
+  @@unique([provider, providerAccountId])
+  @@map("connected_accounts")
+}
+
+/// Encrypted-at-rest secret storage, isolated from the model the frontend reads.
+/// Only ever accessed from server-side email provider code.
+model EmailAccountSecret {
+  id             String   @id @default(cuid())
+  ciphertext     String
+  iv             String
+  authTag        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  accessForAccount  ConnectedAccount? @relation("accessSecret", fields: [accessAccountId], references: [id], onDelete: Cascade)
+  accessAccountId   String?           @unique
+  refreshForAccount ConnectedAccount? @relation("refreshSecret", fields: [refreshAccountId], references: [id], onDelete: Cascade)
+  refreshAccountId  String?           @unique
+
+  @@map("email_account_secrets")
+}
+
+/// Tracks which provider message IDs we've already ingested, for deterministic
+/// dedup independent of whether they produced an ApplicationEvent.
+model ProcessedEmail {
+  id                 String   @id @default(cuid())
+  connectedAccountId String
+  providerMessageId  String
+  processedAt        DateTime @default(now())
+  eventType          EmailEventType
+  createdEventId     String?
+
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([connectedAccountId, providerMessageId])
+  @@map("processed_emails")
+}
+
+model Application {
+  id             String            @id @default(cuid())
+  userId         String
+  company        String
+  role           String
+  source         ApplicationSource
+  appliedAt      DateTime?
+  currentStatus  ApplicationStatus @default(APPLIED)
+  nextAction     String?
+  nextActionDate DateTime?
+  confidence     Float             @default(1.0)
+  reviewState    ReviewState       @default(NONE)
+  notes          String?
+  // Deterministic-matching fingerprint signals, kept for the resolver.
+  senderDomain   String?
+  atsIdentifier  String?
+  isManual       Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events        ApplicationEvent[]
+  notifications Notification[]
+
+  @@index([userId, currentStatus])
+  @@index([userId, company, role])
+  @@map("applications")
+}
+
+model ApplicationEvent {
+  id             String            @id @default(cuid())
+  applicationId  String
+  eventType      EmailEventType
+  status         ApplicationStatus?
+  timestamp      DateTime
+  source         ApplicationSource
+  emailId        String?
+  extractedData  Json?
+  confidence     Float             @default(1.0)
+  createdAt      DateTime          @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([emailId])
+  @@index([applicationId, timestamp])
+  @@map("application_events")
+}
+
+model Notification {
+  id            String           @id @default(cuid())
+  userId        String
+  type          NotificationType
+  title         String
+  message       String
+  applicationId String?
+  read          Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+/// One row per initial-scan or incremental-sync run, so the frontend can show
+/// real (not simulated) progress.
+model ScanJob {
+  id                 String    @id @default(cuid())
+  userId             String
+  connectedAccountId String
+  type               String    // INITIAL | INCREMENTAL
+  stage              ScanStage @default(CONNECTING)
+  emailsScanned      Int       @default(0)
+  emailsRelevant     Int       @default(0)
+  applicationsFound  Int       @default(0)
+  needsReviewCount   Int       @default(0)
+  error              String?
+  startedAt          DateTime  @default(now())
+  completedAt        DateTime?
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@map("scan_jobs")
+}

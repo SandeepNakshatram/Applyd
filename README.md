@@ -99,8 +99,17 @@ testable with zero external API keys.
 ### 2. Database
 
 ```bash
-npx prisma migrate dev   # or: npx prisma db push, for a quick local sync
+npm run db:push      # quick sync, no migration history
+npm run db:migrate   # or: tracked migrations
 ```
+
+Use these (not `npx prisma db push` directly) if you're on Supabase: Prisma's
+migration commands need a connection that supports advisory locks/DDL, which
+Supabase's transaction-mode pooler (the one `DATABASE_URL` should point at
+for app runtime) doesn't support — it fails with `P1017: Server has closed
+the connection`. [`scripts/prisma-migrate-cli.mjs`](scripts/prisma-migrate-cli.mjs)
+runs the Prisma CLI against `DIRECT_URL` (Supabase's Session Pooler) instead,
+without touching the app's own runtime connection string.
 
 ### 3. Run it
 
@@ -120,6 +129,38 @@ New email is picked up by **server-side** incremental sync
 (`GET /api/cron/sync`, protected by `CRON_SECRET`) — never client-side
 polling. `vercel.json` wires this to Vercel Cron every 10 minutes; on any
 other host, point an equivalent scheduler at the same endpoint.
+
+## Deploying to Vercel
+
+Next.js 16 is a [verified Vercel adapter](https://vercel.com/docs/frameworks/full-stack/nextjs) —
+this app deploys with no special configuration beyond:
+
+1. **Environment variables** — set every variable from `.env` in the Vercel
+   project's Environment Variables settings. Update `NEXTAUTH_URL` to the
+   deployed origin (e.g. `https://yourapp.vercel.app`).
+2. **Google OAuth redirect URI** — add
+   `https://yourapp.vercel.app/api/auth/callback/google` as a second
+   Authorized redirect URI in Google Cloud Console (keep the localhost one
+   too, for local dev). If the OAuth consent screen is still in "Testing"
+   publish status, every real user needs to be added as a test user, or
+   published for general availability.
+3. **Prisma Client generation** — handled automatically: `postinstall` runs
+   `prisma generate` on every install, so Vercel's Linux build always
+   produces the right native binary (the generated client itself is
+   gitignored, so nothing platform-specific is ever committed).
+4. **Vercel Cron frequency** — `vercel.json` requests `/api/cron/sync` every
+   10 minutes. Check your plan's cron limits before deploying (some plans
+   restrict cron to daily); adjust the schedule or your plan accordingly.
+5. **Serverless function duration** — the initial historical scan runs via
+   `after()` inside the request that starts it (see **Known V1
+   limitations** below), which is bound by your plan's max function
+   duration. Fine for a typical inbox; a very large mailbox could get cut
+   off mid-scan on a stricter plan.
+
+Nothing else is Vercel-specific: `DATABASE_URL` (the transaction pooler) is
+exactly the connection pattern Supabase recommends for serverless/edge
+deployments, and Proxy (`src/proxy.ts`) runs on the Node.js runtime it
+already defaults to.
 
 ## Testing
 

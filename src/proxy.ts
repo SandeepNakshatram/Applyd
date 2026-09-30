@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
+// Auth.js callbacks in src/auth.ts touch Prisma (Node APIs, native query
+// engine binary). Proxy defaults to the Node.js runtime as of Next.js 16,
+// so no explicit runtime config is needed (setting one here would error).
 const PROTECTED_PREFIXES = ["/dashboard", "/applications", "/review", "/settings", "/scan"];
 
 export default auth((req) => {
@@ -13,7 +16,4 @@ export default auth((req) => {
 
 export const config = {
   matcher: ["/dashboard/:path*", "/applications/:path*", "/review/:path*", "/settings/:path*", "/scan/:path*"],
-  // Auth.js callbacks in src/auth.ts touch Prisma (Node APIs, native query
-  // engine binary), which the default Edge Runtime can't run.
-  runtime: "nodejs",
 };

@@ -10,8 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
+    "db:push": "node scripts/prisma-migrate-cli.mjs db push",
+    "db:migrate": "node scripts/prisma-migrate-cli.mjs migrate dev",
     "db:studio": "prisma studio"
   },
   "dependencies": {

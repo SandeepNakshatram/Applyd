@@ -18,6 +18,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      // Static token/userinfo endpoints skip Auth.js's callback-time OIDC
+      // discovery for Google. That discovery fetch pulls in Google's
+      // discovery doc, which advertises
+      // `authorization_response_iss_parameter_supported: true`, but Google's
+      // actual redirect never includes `iss` — auth4webapi then throws
+      // `response parameter "iss" (issuer) missing` and sign-in fails
+      // silently (no ConnectedAccount ever gets created). Skipping discovery
+      // avoids depending on that (currently inconsistent) metadata at all.
+      token: "https://oauth2.googleapis.com/token",
+      userinfo: "https://openidconnect.googleapis.com/v1/userinfo",
       authorization: {
         params: {
           scope: [

@@ -7,14 +7,18 @@ import type { RawEmail } from "@/types/pipeline";
  */
 export interface EmailProvider {
   /**
-   * Full historical scan. Yields batches of normalized emails so the caller
-   * can report real progress instead of a single blocking call.
+   * Lightweight listing of historical message IDs matching the relevance
+   * pre-filter (no bodies fetched) — fast enough to run in a single request.
+   * Callers fetch and ingest the actual emails afterwards, a few at a time
+   * via `fetchEmailById`, so the work survives serverless duration limits.
    */
-  scanHistorical(onBatch: (batch: RawEmail[]) => Promise<void>): Promise<{
-    totalScanned: number;
-    /** Provider-specific cursor to resume incremental sync from (Gmail historyId). */
-    cursor: string;
-  }>;
+  listHistoricalMessageIds(): Promise<{ messageIds: string[] }>;
+
+  /** Fetches one full message by provider id. Returns null if it's gone. */
+  fetchEmailById(id: string): Promise<RawEmail | null>;
+
+  /** Current provider-specific cursor to resume incremental sync from (Gmail historyId). */
+  getCurrentCursor(): Promise<string>;
 
   /**
    * Incremental sync since the last known cursor. Returns new emails plus the

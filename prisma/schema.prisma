@@ -237,7 +237,14 @@ model ScanJob {
   applicationsFound  Int       @default(0)
   needsReviewCount   Int       @default(0)
   error              String?
+  /// Remaining Gmail message IDs still to be ingested. Populated once (a
+  /// lightweight `messages.list` listing) and drained a small chunk at a
+  /// time by POST /api/scan/[id]/continue, so the historical scan survives
+  /// serverless function duration limits instead of running as one long
+  /// request.
+  pendingMessageIds  Json?
   startedAt          DateTime  @default(now())
+  lastProgressAt     DateTime  @default(now())
   completedAt        DateTime?
 
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)

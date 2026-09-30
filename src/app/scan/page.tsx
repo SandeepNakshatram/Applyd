@@ -37,7 +37,33 @@ export default function ScanPage() {
     if (startedRef.current) return;
     startedRef.current = true;
 
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let cancelled = false;
+
+    // Each call processes one bounded chunk of the scan and returns the
+    // updated status — so we drive progress by chaining calls rather than
+    // polling a status endpoint while a single background task (which would
+    // exceed serverless function duration limits for a large mailbox) does
+    // the work. Re-firing immediately after each response means the pace is
+    // set by actual processing time, not a fixed interval.
+    async function continueUntilDone(scanJobId: string) {
+      while (!cancelled) {
+        const res = await fetch(`/api/scan/${scanJobId}/continue`, { method: "POST" });
+        if (!res.ok) {
+          setError("Could not continue scan.");
+          return;
+        }
+        const { scanJob: job } = await res.json();
+        if (cancelled) return;
+        setScanJob(job);
+
+        if (job.stage === "COMPLETE" || job.stage === "FAILED") {
+          if (job.stage === "COMPLETE") {
+            setTimeout(() => router.push("/dashboard"), 1200);
+          }
+          return;
+        }
+      }
+    }
 
     async function start() {
       try {
@@ -48,19 +74,7 @@ export default function ScanPage() {
           return;
         }
         const { scanJobId } = await res.json();
-
-        pollTimer = setInterval(async () => {
-          const jobRes = await fetch(`/api/scan/${scanJobId}`);
-          if (!jobRes.ok) return;
-          const { scanJob: job } = await jobRes.json();
-          setScanJob(job);
-          if (job.stage === "COMPLETE" || job.stage === "FAILED") {
-            clearInterval(pollTimer);
-            if (job.stage === "COMPLETE") {
-              setTimeout(() => router.push("/dashboard"), 1200);
-            }
-          }
-        }, 1000);
+        await continueUntilDone(scanJobId);
       } catch {
         setError("Could not start scan.");
       }
@@ -68,7 +82,7 @@ export default function ScanPage() {
 
     start();
     return () => {
-      if (pollTimer) clearInterval(pollTimer);
+      cancelled = true;
     };
   }, [router]);
 

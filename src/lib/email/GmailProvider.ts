@@ -47,7 +47,6 @@ function buildSearchQuery(): string {
 }
 
 const MAX_HISTORICAL_MESSAGES = 500;
-const BATCH_SIZE = 25;
 
 export interface GmailProviderOptions {
   accessToken: string;
@@ -78,12 +77,9 @@ export class GmailProvider implements EmailProvider {
     this.gmail = google.gmail({ version: "v1", auth: oauth2Client });
   }
 
-  async scanHistorical(
-    onBatch: (batch: RawEmail[]) => Promise<void>
-  ): Promise<{ totalScanned: number; cursor: string }> {
+  async listHistoricalMessageIds(): Promise<{ messageIds: string[] }> {
     const query = buildSearchQuery();
     let pageToken: string | undefined;
-    let totalScanned = 0;
     const collectedIds: string[] = [];
 
     do {
@@ -98,16 +94,16 @@ export class GmailProvider implements EmailProvider {
       pageToken = list.data.nextPageToken ?? undefined;
     } while (pageToken && collectedIds.length < MAX_HISTORICAL_MESSAGES);
 
-    for (let i = 0; i < collectedIds.length; i += BATCH_SIZE) {
-      const idBatch = collectedIds.slice(i, i + BATCH_SIZE);
-      const emails = await Promise.all(idBatch.map((id) => this.fetchEmail(id)));
-      const valid = emails.filter((e): e is RawEmail => e !== null);
-      totalScanned += valid.length;
-      await onBatch(valid);
-    }
+    return { messageIds: collectedIds };
+  }
 
+  async getCurrentCursor(): Promise<string> {
     const profile = await this.gmail.users.getProfile({ userId: "me" });
-    return { totalScanned, cursor: String(profile.data.historyId ?? "") };
+    return String(profile.data.historyId ?? "");
+  }
+
+  async fetchEmailById(id: string): Promise<RawEmail | null> {
+    return this.fetchEmail(id);
   }
 
   async syncIncremental(

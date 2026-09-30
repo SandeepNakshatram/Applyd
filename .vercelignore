@@ -1,0 +1,4 @@
+.env
+.env.*
+.pgdata-test
+test/.pg-connection.json

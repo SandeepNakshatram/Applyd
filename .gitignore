@@ -46,3 +46,6 @@ next-env.d.ts
 # ephemeral Postgres instance used only by the test suite
 /.pgdata-test
 /test/.pg-connection.json
+
+.vercel
+.env*

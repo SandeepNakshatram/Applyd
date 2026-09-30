@@ -127,8 +127,11 @@ pipeline without live credentials.
 
 New email is picked up by **server-side** incremental sync
 (`GET /api/cron/sync`, protected by `CRON_SECRET`) — never client-side
-polling. `vercel.json` wires this to Vercel Cron every 10 minutes; on any
-other host, point an equivalent scheduler at the same endpoint.
+polling. `vercel.json` wires this to Vercel Cron once daily (`0 5 * * *`) —
+Vercel's Hobby plan rejects any cron more frequent than once/day, so this is
+the fastest schedule that deploys without a Pro plan. On Pro or higher, or on
+any other host, point an equivalent scheduler at the same endpoint as often
+as you like (e.g. every 10 minutes).
 
 ## Deploying to Vercel
 
@@ -148,9 +151,10 @@ this app deploys with no special configuration beyond:
    `prisma generate` on every install, so Vercel's Linux build always
    produces the right native binary (the generated client itself is
    gitignored, so nothing platform-specific is ever committed).
-4. **Vercel Cron frequency** — `vercel.json` requests `/api/cron/sync` every
-   10 minutes. Check your plan's cron limits before deploying (some plans
-   restrict cron to daily); adjust the schedule or your plan accordingly.
+4. **Vercel Cron frequency** — `vercel.json` runs `/api/cron/sync` once daily
+   (Vercel's Hobby plan rejects anything more frequent, and a build with an
+   incompatible schedule fails outright with `deploy_failed`). On Pro or
+   higher, tighten the schedule for faster sync.
 5. **Serverless function duration** — the initial historical scan runs via
    `after()` inside the request that starts it (see **Known V1
    limitations** below), which is bound by your plan's max function

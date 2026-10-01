@@ -2,7 +2,7 @@ import "server-only";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { prisma } from "@/lib/prisma";
-import { storeTokens, updateAccessToken } from "@/lib/email/tokenStore";
+import { storeTokens, replaceTokens } from "@/lib/email/tokenStore";
 
 /**
  * Gmail read-only scope only — the minimum needed to read application-related
@@ -72,10 +72,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       });
 
       if (existing) {
-        await updateAccessToken(existing.accessTokenReference, account.access_token);
+        // Not just a token refresh in place: the account may have been
+        // disconnected (which deletes its secret rows outright), so this
+        // always issues fresh secrets rather than assuming the old ones
+        // are still there to update.
+        const { accessTokenReference, refreshTokenReference } = await replaceTokens({
+          previousAccessTokenReference: existing.accessTokenReference,
+          previousRefreshTokenReference: existing.refreshTokenReference,
+          accessToken: account.access_token,
+          refreshToken: account.refresh_token ?? null,
+        });
         await prisma.connectedAccount.update({
           where: { id: existing.id },
-          data: { status: "ACTIVE", disconnectedAt: null },
+          data: { accessTokenReference, refreshTokenReference, status: "ACTIVE", disconnectedAt: null },
         });
       } else {
         const { accessTokenReference, refreshTokenReference } = await storeTokens({

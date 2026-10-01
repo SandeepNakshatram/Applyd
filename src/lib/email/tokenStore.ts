@@ -28,6 +28,43 @@ export async function storeTokens(params: {
   return { accessTokenReference: accessSecret.id, refreshTokenReference };
 }
 
+/**
+ * Replaces the tokens for an already-connected account (sign-in via an
+ * existing ConnectedAccount row) with freshly issued ones, then removes the
+ * old secret rows. Written as create-then-delete rather than update-in-place
+ * because the old rows may already be gone — e.g. the user disconnected
+ * (which deletes the secrets outright, see deleteTokens) and is now
+ * reconnecting with the same Google account; `deleteMany` is idempotent, so
+ * that case is just a no-op cleanup rather than an error. If Google didn't
+ * reissue a refresh token this time (it only reliably does so on
+ * re-consent), the existing refresh secret is kept rather than discarded.
+ */
+export async function replaceTokens(params: {
+  previousAccessTokenReference: string;
+  previousRefreshTokenReference: string | null;
+  accessToken: string;
+  refreshToken: string | null;
+}): Promise<{ accessTokenReference: string; refreshTokenReference: string | null }> {
+  const accessSecret = await prisma.emailAccountSecret.create({
+    data: encryptSecret(params.accessToken),
+  });
+
+  let refreshTokenReference = params.previousRefreshTokenReference;
+  const idsToDelete = [params.previousAccessTokenReference];
+
+  if (params.refreshToken) {
+    const refreshSecret = await prisma.emailAccountSecret.create({
+      data: encryptSecret(params.refreshToken),
+    });
+    refreshTokenReference = refreshSecret.id;
+    if (params.previousRefreshTokenReference) idsToDelete.push(params.previousRefreshTokenReference);
+  }
+
+  await prisma.emailAccountSecret.deleteMany({ where: { id: { in: idsToDelete } } });
+
+  return { accessTokenReference: accessSecret.id, refreshTokenReference };
+}
+
 export async function updateAccessToken(
   accessTokenReference: string,
   newAccessToken: string

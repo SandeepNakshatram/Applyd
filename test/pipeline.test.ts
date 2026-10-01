@@ -204,11 +204,33 @@ describe("low-confidence extraction goes to the Review Queue", () => {
   });
 });
 
+describe("a reapplication long after the original is a new Application, not a merge", () => {
+  it("creates a second Razorpay application instead of reopening the first", async () => {
+    const result = await ingest(mockEmails.razorpayReapplication);
+    expect(result.outcome).toBe("APPLICATION_CREATED");
+    expect(result.applicationId).not.toBe(
+      (await prisma.application.findFirst({ where: { userId, company: "Razorpay" }, orderBy: { createdAt: "asc" } }))!.id
+    );
+
+    const razorpayApps = await prisma.application.findMany({ where: { userId, company: "Razorpay" } });
+    expect(razorpayApps).toHaveLength(2);
+
+    const newApp = razorpayApps.find((a) => a.id === result.applicationId)!;
+    expect(newApp.currentStatus).toBe("APPLIED");
+    // Allow for local-timezone parsing of the extracted "Jan 15, 2027" date
+    // string landing a day either side in UTC.
+    expect(newApp.appliedAt).not.toBeNull();
+    expect(Math.abs(newApp.appliedAt!.getTime() - new Date("2027-01-15").getTime())).toBeLessThan(
+      2 * 24 * 60 * 60 * 1000
+    );
+  });
+});
+
 describe("notifications", () => {
   it("created a NEW_APPLICATION notification for each newly discovered application", async () => {
     const count = await prisma.notification.count({ where: { userId, type: "NEW_APPLICATION" } });
-    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon = 6 new applications.
-    expect(count).toBe(6);
+    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon, Razorpay-reapplication = 7.
+    expect(count).toBe(7);
   });
 
   it("created STATUS_CHANGE notifications for the screening/assessment/interview updates", async () => {
@@ -223,6 +245,6 @@ describe("notifications", () => {
 
   it("never created a notification for the job alert, irrelevant mail, or the duplicate", async () => {
     const total = await prisma.notification.count({ where: { userId } });
-    expect(total).toBe(6 + 3 + 1);
+    expect(total).toBe(7 + 3 + 1);
   });
 });

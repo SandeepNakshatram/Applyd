@@ -148,6 +148,20 @@ export const mockEmails = {
     receivedAt: "2026-09-22T12:00:00Z",
   }),
 
+  // Same company/role as linkedinConfirmation, but ~4 months later — a
+  // genuine second attempt (e.g. the first one went nowhere), not a
+  // duplicate of the original application.
+  razorpayReapplication: email({
+    providerMessageId: "msg-linkedin-confirmation-reapply-1",
+    threadId: "thread-razorpay-reapply",
+    from: "jobs-noreply@linkedin.com",
+    fromDomain: "linkedin.com",
+    subject: "Your application was sent to Razorpay",
+    snippet: "Razorpay received your application for Product Manager.",
+    body: "Your application was sent to Razorpay. Razorpay has received your application for the Product Manager position. You applied via LinkedIn Easy Apply on Jan 15, 2027.",
+    receivedAt: "2027-01-15T09:00:00Z",
+  }),
+
   duplicateConfirmation: email({
     providerMessageId: "msg-linkedin-confirmation-1-resend",
     threadId: "thread-razorpay",

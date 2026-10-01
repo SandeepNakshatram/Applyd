@@ -8,6 +8,16 @@ import { notifyNewApplication, notifyReviewNeeded, notifyStatusChange } from "./
 /** Below this, a resolved application is routed to the Review Queue instead of the dashboard. */
 export const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
 
+/**
+ * A fresh "applied" confirmation for the same company+role, arriving this
+ * long after the matched application's appliedAt, is treated as a genuine
+ * second application rather than folded into the old one — e.g. reapplying
+ * to a role that went nowhere the first time. Matching by an explicit
+ * atsIdentifier is unaffected: that's a strong enough signal to always merge
+ * on (and a real reapplication normally gets its own new ATS id anyway).
+ */
+const REAPPLICATION_GAP_DAYS = 90;
+
 interface NextAction {
   nextAction: string | null;
   nextActionDate: Date | null;
@@ -35,6 +45,7 @@ function deriveNextAction(eventType: EmailEventType, from: Date): NextAction {
 
 async function findMatchingApplication(
   userId: string,
+  email: RawEmail,
   extraction: ExtractionResult
 ): Promise<Application | null> {
   if (extraction.atsIdentifier) {
@@ -53,7 +64,22 @@ async function findMatchingApplication(
       },
       orderBy: { createdAt: "desc" },
     });
-    if (byCompanyRole) return byCompanyRole;
+
+    if (byCompanyRole) {
+      if (extraction.eventType === "APPLICATION_CONFIRMATION" && byCompanyRole.appliedAt) {
+        const newAppliedAt = extraction.applicationDate
+          ? new Date(extraction.applicationDate)
+          : email.receivedAt;
+        const gapDays =
+          (newAppliedAt.getTime() - byCompanyRole.appliedAt.getTime()) / (1000 * 60 * 60 * 24);
+        if (gapDays > REAPPLICATION_GAP_DAYS) {
+          // Treat as a new, separate application attempt rather than
+          // reopening/overwriting the old one.
+          return null;
+        }
+      }
+      return byCompanyRole;
+    }
   }
 
   return null;
@@ -67,7 +93,7 @@ export async function resolveApplication(params: {
   const { userId, email, extraction } = params;
   const source = extraction.source ?? "OTHER";
 
-  const existing = await findMatchingApplication(userId, extraction);
+  const existing = await findMatchingApplication(userId, email, extraction);
 
   if (existing) {
     // A resend/duplicate notification of an update we've already recorded

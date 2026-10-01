@@ -11,10 +11,14 @@ export function getAIClient(): AIClient {
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey && !apiKey.startsWith("replace-with")) {
-    // "gemini-flash-latest" is an alias Google maintains across model
-    // retirements — prefer it over pinning a dated version name that can
-    // 404 once retired (as gemini-2.0-flash did).
-    cached = new GeminiClient(apiKey, process.env.GEMINI_MODEL || "gemini-flash-latest");
+    // "gemini-flash-lite-latest" (a) is an alias Google maintains across
+    // model retirements — avoids pinning a dated version name that can 404
+    // once retired, as gemini-2.0-flash did — and (b) the free tier's daily
+    // request quota for non-lite "flash"/"pro" models is small enough
+    // (as low as 20/day) that a single mailbox scan can exhaust it; lite
+    // models get a much higher free allotment and are plenty capable for
+    // structured classification/extraction.
+    cached = new GeminiClient(apiKey, process.env.GEMINI_MODEL || "gemini-flash-lite-latest");
   } else {
     cached = heuristicClient;
   }

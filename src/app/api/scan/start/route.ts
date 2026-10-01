@@ -9,11 +9,17 @@ import { createScanJob, startInitialScan } from "@/lib/pipeline/scan";
  * scan got killed by a function duration limit before chunking existed). */
 const STALE_AFTER_MS = 3 * 60 * 1000;
 
-export async function POST() {
+export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Settings' "Rescan inbox" button passes force so a user can always trigger
+  // a fresh historical scan themselves, even if the last one completed
+  // normally (e.g. after they've gone and fixed something upstream).
+  const body = await req.json().catch(() => ({}));
+  const force = body?.force === true;
 
   const account = await getActiveConnectedAccount(session.user.id);
   if (!account) {
@@ -31,7 +37,7 @@ export async function POST() {
     existingJob.stage !== "FAILED" &&
     Date.now() - existingJob.lastProgressAt.getTime() > STALE_AFTER_MS;
 
-  if (existingJob && existingJob.stage !== "FAILED" && !isStale) {
+  if (!force && existingJob && existingJob.stage !== "FAILED" && !isStale) {
     return NextResponse.json({ scanJobId: existingJob.id });
   }
 

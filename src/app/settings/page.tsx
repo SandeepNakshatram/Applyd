@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/layout/AppShell";
 import { ConnectGmailButton } from "@/components/auth/ConnectButtons";
 import { DisconnectAccountButton } from "@/components/settings/DisconnectAccountButton";
+import { RescanButton } from "@/components/settings/RescanButton";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -31,7 +32,10 @@ export default async function SettingsPage() {
                     : "Sync in progress"}
                 </p>
               </div>
-              <DisconnectAccountButton />
+              <div className="flex gap-2">
+                <RescanButton />
+                <DisconnectAccountButton />
+              </div>
             </div>
           ) : (
             <div className="mt-3 flex items-center justify-between">

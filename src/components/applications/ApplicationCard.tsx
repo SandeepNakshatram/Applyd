@@ -1,12 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { Mail } from "lucide-react";
 import { SourceBadge } from "./SourceBadge";
 import { StatusBadge } from "./StatusBadge";
 import type { Application } from "@/generated/prisma";
+import { gmailMessageUrl } from "@/lib/email/gmailLink";
 
 /** Review Queue card (spec section 15): company/role/source/status/confidence + confirm/edit/ignore. */
-export function ApplicationCard({ application }: { application: Application }) {
+export function ApplicationCard({
+  application,
+  sourceEmailId,
+}: {
+  application: Application;
+  /** The Gmail message ID that produced this application/event, if any (manual entries have none). */
+  sourceEmailId: string | null;
+}) {
   const router = useRouter();
 
   async function act(reviewAction: "confirm" | "ignore") {
@@ -34,7 +43,7 @@ export function ApplicationCard({ application }: { application: Application }) {
         </span>
       </div>
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <button
           onClick={() => act("confirm")}
           className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
@@ -53,6 +62,17 @@ export function ApplicationCard({ application }: { application: Application }) {
         >
           Ignore
         </button>
+        {sourceEmailId && (
+          <a
+            href={gmailMessageUrl(sourceEmailId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-auto flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            Check email
+          </a>
+        )}
       </div>
     </div>
   );

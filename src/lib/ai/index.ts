@@ -11,7 +11,10 @@ export function getAIClient(): AIClient {
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey && !apiKey.startsWith("replace-with")) {
-    cached = new GeminiClient(apiKey, process.env.GEMINI_MODEL || "gemini-2.0-flash");
+    // "gemini-flash-latest" is an alias Google maintains across model
+    // retirements — prefer it over pinning a dated version name that can
+    // 404 once retired (as gemini-2.0-flash did).
+    cached = new GeminiClient(apiKey, process.env.GEMINI_MODEL || "gemini-flash-latest");
   } else {
     cached = heuristicClient;
   }

@@ -1,5 +1,7 @@
 import { format } from "date-fns";
+import { Mail } from "lucide-react";
 import type { ApplicationEvent } from "@/generated/prisma";
+import { gmailMessageUrl } from "@/lib/email/gmailLink";
 
 const EVENT_LABELS: Record<ApplicationEvent["eventType"], string> = {
   APPLICATION_CONFIRMATION: "Applied",
@@ -27,7 +29,15 @@ export function ApplicationTimeline({ events }: { events: ApplicationEvent[] }) 
           <p className="text-sm font-medium text-slate-900">{EVENT_LABELS[event.eventType]}</p>
           <p className="text-xs text-slate-400">{format(new Date(event.timestamp), "MMM d, yyyy p")}</p>
           {event.emailId && (
-            <p className="mt-1 text-xs italic text-slate-400">Detected from email</p>
+            <a
+              href={gmailMessageUrl(event.emailId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-xs italic text-slate-400 hover:text-slate-600 hover:underline"
+            >
+              <Mail className="h-3 w-3" />
+              Detected from email — check it
+            </a>
           )}
         </li>
       ))}

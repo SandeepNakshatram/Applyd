@@ -12,6 +12,7 @@ export default async function ReviewPage() {
   const applications = await prisma.application.findMany({
     where: { userId: session.user.id, reviewState: "PENDING" },
     orderBy: { createdAt: "desc" },
+    include: { events: { orderBy: { timestamp: "desc" }, take: 1 } },
   });
 
   return (
@@ -32,7 +33,7 @@ export default async function ReviewPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {applications.map((app) => (
-              <ApplicationCard key={app.id} application={app} />
+              <ApplicationCard key={app.id} application={app} sourceEmailId={app.events[0]?.emailId ?? null} />
             ))}
           </div>
         )}

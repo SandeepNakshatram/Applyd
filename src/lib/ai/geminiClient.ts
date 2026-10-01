@@ -64,6 +64,7 @@ export class GeminiClient implements AIClient {
             },
             required: ["eventType", "confidence"],
           },
+          ...NO_THINKING,
         },
       });
 
@@ -75,7 +76,8 @@ export class GeminiClient implements AIClient {
         confidence: clamp01(parsed.confidence),
         reasoning: parsed.reasoning,
       };
-    } catch {
+    } catch (err) {
+      console.error("[GeminiClient] classifyEmail failed, falling back to heuristic:", err);
       return heuristicClient.classifyEmail(email);
     }
   }
@@ -114,6 +116,7 @@ export class GeminiClient implements AIClient {
             },
             required: ["confidence"],
           },
+          ...NO_THINKING,
         },
       });
 
@@ -135,11 +138,21 @@ export class GeminiClient implements AIClient {
         confidence: clamp01(parsed.confidence),
         atsIdentifier: nullableString(parsed.atsIdentifier),
       };
-    } catch {
+    } catch (err) {
+      console.error("[GeminiClient] extractApplication failed, falling back to heuristic:", err);
       return heuristicClient.extractApplication(email, classification);
     }
   }
 }
+
+/**
+ * Disables "thinking" mode via a config field not yet in this SDK version's
+ * types (the REST API honors it regardless — verified directly). Extended
+ * reasoning adds real latency and token cost we don't need for a structured
+ * classify/extract call, and was part of why scans ran slower than
+ * necessary.
+ */
+const NO_THINKING = { thinkingConfig: { thinkingBudget: 0 } } as Record<string, unknown>;
 
 function buildClassificationPrompt(email: RawEmail): string {
   return `You classify emails for a job application tracker. Given the email below, return the single best category.

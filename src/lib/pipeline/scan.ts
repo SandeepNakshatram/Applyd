@@ -4,7 +4,7 @@ import { getAIClient } from "@/lib/ai";
 import type { EmailProvider } from "@/lib/email/EmailProvider";
 import { ingestEmail } from "./ingest";
 import type { PipelineIngestResult } from "@/types/pipeline";
-import type { ScanJob } from "@/generated/prisma";
+import { Prisma, type ScanJob } from "@/generated/prisma";
 
 /** Emails processed per `continueInitialScan` call — small enough that even a
  * slow AI-backed chunk finishes comfortably within a serverless function's
@@ -78,67 +78,88 @@ export async function continueInitialScan(params: {
   provider: EmailProvider;
 }): Promise<ScanJob> {
   const { scanJobId, userId, connectedAccountId, provider } = params;
-  const job = await prisma.scanJob.findUniqueOrThrow({ where: { id: scanJobId } });
 
-  if (job.stage === "COMPLETE" || job.stage === "FAILED") {
-    return job;
-  }
+  // Claim the next chunk atomically: lock the row for the duration of this
+  // transaction so two overlapping callers (e.g. a refreshed scan page
+  // racing a still-running loop from before the refresh) can never both
+  // claim the same message IDs — without this, both would ingest the same
+  // email concurrently and crash on ApplicationEvent's unique emailId
+  // constraint instead of the normal "already processed" dedup path ever
+  // getting a chance to run.
+  const claim = await prisma.$transaction(async (tx) => {
+    const [job] = await tx.$queryRaw<ScanJob[]>`SELECT * FROM scan_jobs WHERE id = ${scanJobId} FOR UPDATE`;
+    if (!job) throw new Error("Scan job not found");
+    if (job.stage === "COMPLETE" || job.stage === "FAILED") {
+      return { job, chunk: [] as string[], isDone: true, alreadyFinished: true };
+    }
 
-  const aiClient = getAIClient();
-  const pending = Array.isArray(job.pendingMessageIds) ? (job.pendingMessageIds as string[]) : [];
-
-  try {
+    const pending = Array.isArray(job.pendingMessageIds) ? (job.pendingMessageIds as string[]) : [];
     const chunk = pending.slice(0, CHUNK_SIZE);
     const remaining = pending.slice(CHUNK_SIZE);
 
-    let scanned = job.emailsScanned;
-    let relevantCount = job.emailsRelevant;
-    let applicationsFound = job.applicationsFound;
-    let needsReviewCount = job.needsReviewCount;
+    const updated = await tx.scanJob.update({
+      where: { id: scanJobId },
+      data: { stage: "EXTRACTING_INFO", pendingMessageIds: remaining, lastProgressAt: new Date() },
+    });
+
+    return { job: updated, chunk, isDone: remaining.length === 0, alreadyFinished: false };
+  });
+
+  if (claim.alreadyFinished) return claim.job;
+
+  try {
+    const aiClient = getAIClient();
 
     // Fetch concurrently (independent network calls), but ingest one at a
     // time — the resolver does a check-then-act read/write against shared
     // Application rows, and concurrent ingestion could race two emails
     // destined for the same application.
-    const emails = await Promise.all(chunk.map((id) => provider.fetchEmailById(id)));
+    const emails = await Promise.all(claim.chunk.map((id) => provider.fetchEmailById(id)));
+
+    let scanned = 0;
+    let relevantCount = 0;
+    let applicationsFound = 0;
+    let needsReviewCount = 0;
     for (const email of emails) {
       if (!email) continue;
       scanned += 1;
-      const result = await ingestEmail({ userId, connectedAccountId, email, aiClient });
-      const counts = countsForOutcome(result.outcome);
-      if (counts.relevant) relevantCount += 1;
-      if (counts.applicationFound) applicationsFound += 1;
-      if (counts.needsReview) needsReviewCount += 1;
+      try {
+        const result = await ingestEmail({ userId, connectedAccountId, email, aiClient });
+        const counts = countsForOutcome(result.outcome);
+        if (counts.relevant) relevantCount += 1;
+        if (counts.applicationFound) applicationsFound += 1;
+        if (counts.needsReview) needsReviewCount += 1;
+      } catch (err) {
+        // Defense-in-depth: the chunk claim above already prevents two scan
+        // continuations from processing the same email, but an incremental
+        // sync (cron) could in principle race the same message independently.
+        // Treat a duplicate-key error on this one email as "already
+        // processed" rather than failing the entire chunk over it.
+        const isDuplicateKey =
+          err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+        if (!isDuplicateKey) throw err;
+      }
     }
 
-    if (remaining.length > 0) {
-      return await prisma.scanJob.update({
-        where: { id: scanJobId },
-        data: {
-          stage: "EXTRACTING_INFO",
-          pendingMessageIds: remaining,
-          emailsScanned: scanned,
-          emailsRelevant: relevantCount,
-          applicationsFound,
-          needsReviewCount,
-          lastProgressAt: new Date(),
-        },
-      });
-    }
-
-    // Last chunk processed — finalize.
     await prisma.scanJob.update({
       where: { id: scanJobId },
       data: {
-        stage: "MATCHING_APPLICATIONS",
-        pendingMessageIds: [],
-        emailsScanned: scanned,
-        emailsRelevant: relevantCount,
-        applicationsFound,
-        needsReviewCount,
+        emailsScanned: { increment: scanned },
+        emailsRelevant: { increment: relevantCount },
+        applicationsFound: { increment: applicationsFound },
+        needsReviewCount: { increment: needsReviewCount },
         lastProgressAt: new Date(),
       },
     });
+
+    if (!claim.isDone) {
+      return await prisma.scanJob.findUniqueOrThrow({ where: { id: scanJobId } });
+    }
+
+    // Last chunk processed — finalize. The FOR UPDATE claim above guarantees
+    // exactly one caller ever observes isDone for a given scan job, so this
+    // can't race another finalization.
+    await prisma.scanJob.update({ where: { id: scanJobId }, data: { stage: "MATCHING_APPLICATIONS" } });
     await prisma.scanJob.update({ where: { id: scanJobId }, data: { stage: "BUILDING_TIMELINES" } });
     await prisma.scanJob.update({ where: { id: scanJobId }, data: { stage: "CREATING_NOTIFICATIONS" } });
 

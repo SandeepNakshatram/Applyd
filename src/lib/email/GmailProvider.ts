@@ -40,10 +40,21 @@ const SUBJECT_KEYWORDS = [
   "next steps",
 ];
 
+/** Only scan mail from roughly this far back — an application older than
+ * this isn't actionable (interview windows, offer deadlines, etc. have long
+ * since passed), and it keeps each scan bounded regardless of inbox age. */
+const HISTORICAL_LOOKBACK_DAYS = 60;
+
 function buildSearchQuery(): string {
   const domainClause = JOB_SENDER_DOMAINS.map((d) => `from:${d}`).join(" OR ");
   const subjectClause = SUBJECT_KEYWORDS.map((k) => `subject:"${k}"`).join(" OR ");
-  return `(${domainClause}) OR (${subjectClause})`;
+  const since = new Date(Date.now() - HISTORICAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const afterClause = `after:${since.getUTCFullYear()}/${pad2(since.getUTCMonth() + 1)}/${pad2(since.getUTCDate())}`;
+  return `((${domainClause}) OR (${subjectClause})) ${afterClause}`;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
 const MAX_HISTORICAL_MESSAGES = 500;

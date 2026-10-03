@@ -5,6 +5,12 @@ import type { AIClient } from "./types";
 
 let cached: AIClient | null = null;
 
+/** True when a real model (Gemini) is configured, as opposed to the rule-based heuristics only. */
+export function isModelConfigured(): boolean {
+  const apiKey = process.env.GEMINI_API_KEY;
+  return Boolean(apiKey && !apiKey.startsWith("replace-with"));
+}
+
 /** Gemini when a real key is configured, deterministic heuristics otherwise. */
 export function getAIClient(): AIClient {
   if (cached) return cached;

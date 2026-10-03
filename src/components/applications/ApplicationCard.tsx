@@ -6,6 +6,7 @@ import { SourceBadge } from "./SourceBadge";
 import { StatusBadge } from "./StatusBadge";
 import type { Application } from "@/generated/prisma";
 import { gmailMessageUrl } from "@/lib/email/gmailLink";
+import { ReanalyzeButton } from "./ReanalyzeButton";
 
 /** Review Queue card (spec section 15): company/role/source/status/confidence + confirm/edit/ignore. */
 export function ApplicationCard({
@@ -62,6 +63,7 @@ export function ApplicationCard({
         >
           Ignore
         </button>
+        {sourceEmailId && <ReanalyzeButton applicationId={application.id} />}
         {sourceEmailId && (
           <a
             href={gmailMessageUrl(sourceEmailId)}

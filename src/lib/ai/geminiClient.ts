@@ -126,6 +126,7 @@ export class GeminiClient implements AIClient {
         eventType,
         confidence: classificationConfidence,
         reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : undefined,
+        engine: "gemini",
       };
     } catch (err) {
       console.error("[GeminiClient] classify+extract failed, falling back to heuristic:", err);
@@ -164,21 +165,38 @@ export class GeminiClient implements AIClient {
 }
 
 function buildCombinedPrompt(email: RawEmail): string {
-  return `You classify and extract structured data from an email for a job application tracker, in one pass.
+  return `You read one email for a job-application tracker and return JSON: first CLASSIFY it, then EXTRACT fields.
 
-First, classify it into one category: ${EVENT_TYPES.join(", ")}
-- APPLICATION_CONFIRMATION: confirms a job application was submitted.
-- APPLICATION_STATUS_UPDATE: a generic status change on an existing application.
-- SCREENING / ASSESSMENT / INTERVIEW / OFFER / REJECTION: specific pipeline stages.
-- RECRUITER_OUTREACH: a recruiter reaching out, not yet an application.
-- JOB_ALERT: a digest/recommendation of open jobs. This is NEVER an application event.
-- IRRELEVANT: anything not related to a specific job application.
+## Classification (eventType) — pick exactly one
+- APPLICATION_CONFIRMATION: the recipient applied for a JOB (employment) and this confirms it was received/submitted, or asks them to complete/finish that application.
+- APPLICATION_STATUS_UPDATE: a generic status change on a job application the recipient already made.
+- SCREENING: profile shortlisted / under review / recruiter screening call.
+- ASSESSMENT: a test, coding challenge, or assignment to complete.
+- INTERVIEW: an interview is being invited, scheduled or confirmed.
+- OFFER: a job offer.
+- REJECTION: the application was declined / not moving forward.
+- RECRUITER_OUTREACH: a real person (recruiter/hiring manager) writing to the recipient about a role. The recipient has NOT applied.
+- JOB_ALERT: automated marketing from a job board or recruiter tool — "jobs for you", "great match", "you're invited to apply", "Apply Now" buttons, saved-search digests. The recipient has NOT applied. This is never an application.
+- IRRELEVANT: anything else. IMPORTANT: "applications" that are NOT for a job are IRRELEVANT — school/college/university admissions or entrance tests, exam registrations/results, scholarships, course enrolment, visas, loans, event tickets, newsletters.
 
-Then, unless the category is JOB_ALERT or IRRELEVANT, extract: company, role,
-applicationDate (ISO YYYY-MM-DD), status (one of ${STATUSES.join(", ")}), and
-atsIdentifier (a job/requisition/candidate ID if present). Return null for any
-field you cannot find with confidence — never guess or invent a value.
+## Extraction (leave every field null unless the email supports it — never guess)
+- company: the EMPLOYER. Use the explicit name; if the email is sent by the employer, take it from the subject, signature ("Infosys Limited"), or sender domain. NEVER use a job board / ATS (Naukri, LinkedIn, Foundit, Indeed, Workday, Greenhouse...) as the company.
+- role: the job title only (e.g. "Technology Analyst"), not a sentence. null if the email doesn't state one.
+- applicationDate: ISO YYYY-MM-DD of when the person applied, only if stated; otherwise null.
+- status: APPLIED (applied, or asked to complete the application), SCREENING, ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN. Match it to the stage this email is about.
+- atsIdentifier: any Candidate ID / Application ID / Job ID / Requisition ID / reference number.
+- For JOB_ALERT and IRRELEVANT, return null for all extraction fields.
 
+## Examples
+- "Regarding your application with Infosys — Thank you for applying for the role of Technology Analyst. Please log in to complete your application." from TalentAcquisition@infosys.com
+  => APPLICATION_CONFIRMATION, company "Infosys", role "Technology Analyst", status APPLIED.
+- "Interview Invite: Alex | Candidate ID: 1004334000 ... We have scheduled an interview for you" from talent-acquisition@infosys.com
+  => INTERVIEW, company "Infosys", role null, status INTERVIEW, atsIdentifier "1004334000".
+- "Congratulations on completing the Admissions Test! Your application has been submitted" from a business school => IRRELEVANT (admissions, not a job).
+- "You're invited to apply for the Java Developer role at Acme — This role is a great match! [Apply Now]" from a job board => JOB_ALERT.
+
+## Email
+Received: ${email.receivedAt.toISOString().slice(0, 10)}
 From: ${email.from}
 Subject: ${email.subject}
 Body:

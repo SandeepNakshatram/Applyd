@@ -226,16 +226,58 @@ describe("a reapplication long after the original is a new Application, not a me
   });
 });
 
+describe("real-world mail that earlier versions got wrong", () => {
+  it("drops a school admissions 'application' — it isn't a job", async () => {
+    const result = await ingest(mockEmails.mesaAdmissions);
+    expect(result.outcome).toBe("IGNORED_IRRELEVANT");
+  });
+
+  it("drops a job-board advertisement ('you're invited to apply … great match')", async () => {
+    const result = await ingest(mockEmails.founditJobAd);
+    expect(result.outcome).toBe("IGNORED_JOB_ALERT");
+  });
+
+  it("does not turn unsolicited recruiter outreach into an application", async () => {
+    const result = await ingest(mockEmails.recruiterOutreach);
+    expect(result.outcome).toBe("IGNORED_RECRUITER_OUTREACH");
+    expect(await prisma.application.count({ where: { userId, company: { contains: "Examplesoft", mode: "insensitive" } } })).toBe(0);
+  });
+
+  it("reads company from the subject and role from 'the role of X' — no sentence fragments", async () => {
+    const result = await ingest(mockEmails.infosysIncompleteApplication);
+    expect(result.outcome).toBe("APPLICATION_CREATED");
+
+    const application = await prisma.application.findUniqueOrThrow({ where: { id: result.applicationId } });
+    expect(application.company).toBe("Infosys");
+    expect(application.role).toBe("Technology Analyst");
+    expect(application.currentStatus).toBe("APPLIED");
+    expect(application.reviewState).toBe("NONE");
+  });
+
+  it("attaches an interview invite that names no role to the one open Infosys application, learning its candidate id", async () => {
+    const result = await ingest(mockEmails.infosysInterviewInvite);
+    expect(result.outcome).toBe("EVENT_ADDED_WITH_NOTIFICATION");
+
+    const infosys = await prisma.application.findMany({ where: { userId, company: "Infosys" } });
+    expect(infosys).toHaveLength(1);
+    expect(infosys[0].id).toBe(result.applicationId);
+    expect(infosys[0].role).toBe("Technology Analyst");
+    expect(infosys[0].currentStatus).toBe("INTERVIEW");
+    expect(infosys[0].atsIdentifier).toBe("1004334000");
+    expect(infosys[0].reviewState).toBe("NONE");
+  });
+});
+
 describe("notifications", () => {
   it("created a NEW_APPLICATION notification for each newly discovered application", async () => {
     const count = await prisma.notification.count({ where: { userId, type: "NEW_APPLICATION" } });
-    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon, Razorpay-reapplication = 7.
-    expect(count).toBe(7);
+    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon, Razorpay-reapplication, Infosys = 8.
+    expect(count).toBe(8);
   });
 
   it("created STATUS_CHANGE notifications for the screening/assessment/interview updates", async () => {
     const count = await prisma.notification.count({ where: { userId, type: "STATUS_CHANGE" } });
-    expect(count).toBe(3); // Razorpay screening + interview, Microsoft assessment.
+    expect(count).toBe(4); // Razorpay screening + interview, Microsoft assessment, Infosys interview.
   });
 
   it("created a REVIEW_NEEDED notification for the ambiguous application", async () => {
@@ -245,6 +287,6 @@ describe("notifications", () => {
 
   it("never created a notification for the job alert, irrelevant mail, or the duplicate", async () => {
     const total = await prisma.notification.count({ where: { userId } });
-    expect(total).toBe(7 + 3 + 1);
+    expect(total).toBe(8 + 4 + 1);
   });
 });

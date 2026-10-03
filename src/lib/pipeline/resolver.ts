@@ -18,6 +18,9 @@ export const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
  */
 const REAPPLICATION_GAP_DAYS = 90;
 
+export const UNKNOWN_COMPANY = "Unknown company";
+export const UNKNOWN_ROLE = "Unknown role";
+
 interface NextAction {
   nextAction: string | null;
   nextActionDate: Date | null;
@@ -43,6 +46,18 @@ function deriveNextAction(eventType: EmailEventType, from: Date): NextAction {
   }
 }
 
+/**
+ * Deterministic matching, strongest signal first:
+ *   1. explicit ATS / candidate / application id
+ *   2. company + role (case-insensitive), unless it's a fresh application
+ *      long after the matched one (see REAPPLICATION_GAP_DAYS)
+ *   3. company alone, when the email names no role (e.g. an interview invite)
+ *      and the user has exactly ONE open application there — or when the
+ *      email names a role and exactly one open application at that company
+ *      still has a placeholder role. Ambiguity (several candidates) means no
+ *      match: wrongly merging two applications is worse than a duplicate the
+ *      user can see and ignore.
+ */
 async function findMatchingApplication(
   userId: string,
   email: RawEmail,
@@ -82,6 +97,20 @@ async function findMatchingApplication(
     }
   }
 
+  if (extraction.company && extraction.company !== UNKNOWN_COMPANY) {
+    const openAtCompany = await prisma.application.findMany({
+      where: {
+        userId,
+        company: { equals: extraction.company, mode: "insensitive" },
+        currentStatus: { notIn: ["REJECTED", "WITHDRAWN"] },
+        reviewState: { not: "IGNORED" },
+        ...(extraction.role ? { role: { equals: UNKNOWN_ROLE, mode: "insensitive" as const } } : {}),
+      },
+      take: 2,
+    });
+    if (openAtCompany.length === 1) return openAtCompany[0];
+  }
+
   return null;
 }
 
@@ -89,11 +118,22 @@ export async function resolveApplication(params: {
   userId: string;
   email: RawEmail;
   extraction: ExtractionResult;
+  /** false suppresses in-app notifications (re-analysis of something the user already saw). */
+  notify?: boolean;
 }): Promise<PipelineIngestResult> {
-  const { userId, email, extraction } = params;
+  const { userId, email, extraction, notify = true } = params;
   const source = extraction.source ?? "OTHER";
 
+  const send = async <T extends { id: string }>(fn: () => Promise<T>): Promise<string | undefined> =>
+    notify ? (await fn()).id : undefined;
+
   const existing = await findMatchingApplication(userId, email, extraction);
+
+  if (!existing && extraction.eventType === "RECRUITER_OUTREACH") {
+    // Unsolicited outreach is a lead, not an application the user submitted.
+    // It's only recorded when it belongs to an application we already track.
+    return { outcome: "IGNORED_RECRUITER_OUTREACH" };
+  }
 
   if (existing) {
     // A resend/duplicate notification of an update we've already recorded
@@ -139,19 +179,27 @@ export async function resolveApplication(params: {
         currentStatus: extraction.status ?? existing.currentStatus,
         nextAction: nextAction.nextAction,
         nextActionDate: nextAction.nextActionDate,
+        // Learn from later mail: fill placeholders and the missing id, never overwrite real values.
+        ...(extraction.company && existing.company === UNKNOWN_COMPANY ? { company: extraction.company } : {}),
+        ...(extraction.role && existing.role === UNKNOWN_ROLE ? { role: extraction.role } : {}),
+        ...(extraction.atsIdentifier && !existing.atsIdentifier
+          ? { atsIdentifier: extraction.atsIdentifier }
+          : {}),
         ...(enteringReview ? { reviewState: "PENDING" } : {}),
       },
     });
 
-    const notification = enteringReview
-      ? await notifyReviewNeeded(userId, updated)
-      : await notifyStatusChange(userId, updated, extraction.eventType);
+    const notificationId = await send(() =>
+      enteringReview
+        ? notifyReviewNeeded(userId, updated)
+        : notifyStatusChange(userId, updated, extraction.eventType)
+    );
 
     return {
       outcome: "EVENT_ADDED_WITH_NOTIFICATION",
       applicationId: existing.id,
       eventId: event.id,
-      notificationId: notification.id,
+      notificationId,
     };
   }
 
@@ -162,8 +210,8 @@ export async function resolveApplication(params: {
   const application = await prisma.application.create({
     data: {
       userId,
-      company: extraction.company ?? "Unknown company",
-      role: extraction.role ?? "Unknown role",
+      company: extraction.company ?? UNKNOWN_COMPANY,
+      role: extraction.role ?? UNKNOWN_ROLE,
       source,
       appliedAt:
         extraction.eventType === "APPLICATION_CONFIRMATION"
@@ -194,14 +242,14 @@ export async function resolveApplication(params: {
     },
   });
 
-  const notification = needsReview
-    ? await notifyReviewNeeded(userId, application)
-    : await notifyNewApplication(userId, application);
+  const notificationId = await send(() =>
+    needsReview ? notifyReviewNeeded(userId, application) : notifyNewApplication(userId, application)
+  );
 
   return {
     outcome: needsReview ? "SENT_TO_REVIEW" : "APPLICATION_CREATED",
     applicationId: application.id,
     eventId: event.id,
-    notificationId: notification.id,
+    notificationId,
   };
 }

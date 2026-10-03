@@ -148,6 +148,68 @@ export const mockEmails = {
     receivedAt: "2026-09-22T12:00:00Z",
   }),
 
+  // --- Real-world shapes that earlier versions got wrong (anonymized) ---
+
+  // Company only in the subject/signature; role in "the role of X"; asks to finish the application.
+  infosysIncompleteApplication: email({
+    providerMessageId: "msg-infosys-incomplete-1",
+    threadId: "thread-infosys",
+    from: "TalentAcquisition@infosys.com",
+    fromDomain: "infosys.com",
+    subject: "Regarding your application with Infosys",
+    snippet: "Thank you for applying for the role of Technology Analyst.",
+    body: "Hi Alex Doe, Greetings! Thank you for applying for the role of Technology Analyst. In order take your application ahead, we would like you to complete your application. Please log in to Infosys Careers to view your incomplete application. Visit Infosys Careers to learn more about how we help you move forward in your career. Thank you. Best regards, Talent Acquisition Infosys Limited",
+    receivedAt: "2026-09-10T08:00:00Z",
+  }),
+
+  // Names no role at all; the only link to the application is the company + a candidate id.
+  infosysInterviewInvite: email({
+    providerMessageId: "msg-infosys-interview-1",
+    threadId: "thread-infosys-interview",
+    from: "talent-acquisition@infosys.com",
+    fromDomain: "infosys.com",
+    subject: "Interview Invite: Alex | Candidate ID: 1004334000",
+    snippet: "Thank you for accepting our interview invitation.",
+    body: "Dear Alex, Thank you for accepting our interview invitation. We have scheduled an interview for you with our panelists, the details of which is shared below. Your name as per our records: Alex Doe Candidate Id: 1004334000 Meeting Date and Time: 04-07-2026 11:00 IST Interview Link: https://example.invalid/meet/xyz",
+    receivedAt: "2026-09-20T07:00:00Z",
+  }),
+
+  // A school admissions mail: "application submitted", but not a job.
+  mesaAdmissions: email({
+    providerMessageId: "msg-admissions-1",
+    threadId: "thread-admissions",
+    from: "admissions@mesaschool.edu",
+    fromDomain: "mesaschool.edu",
+    subject: "Your application has been submitted",
+    snippet: "Congratulations on completing the Admissions Test!",
+    body: "Hi Alex, Congratulations on completing the Admissions Test (MAT)! The biggest step is out of the way. Your application has been successfully submitted. You will hear back from us on the status of your application within 7 days. In the meantime, get a closer look at what outcomes at Mesa really look like. Regards, Admissions Team Mesa School of Business",
+    receivedAt: "2026-09-12T10:00:00Z",
+  }),
+
+  // A job-board advertisement, not an application and not a person writing to you.
+  founditJobAd: email({
+    providerMessageId: "msg-foundit-ad-1",
+    threadId: "thread-foundit-ad",
+    from: "opportunities@foundit.in",
+    fromDomain: "foundit.in",
+    subject: "You're invited to apply for the Java Full Stack role at Acme Staffing",
+    snippet: "This role is a great match!",
+    body: "This role is a great match! Hi Alex, We came across your profile and believe it's a strong match for our Java Full Stack role at Acme Staffing. Here's the role at a glance: Job Title: Java Full Stack. Experience: 5-10 Years. This opportunity could be a great fit for you. View the role & apply here: Apply Now Best Regards",
+    receivedAt: "2026-09-14T06:00:00Z",
+  }),
+
+  // A real recruiter writing to you, but you haven't applied — a lead, not an application.
+  recruiterOutreach: email({
+    providerMessageId: "msg-recruiter-outreach-1",
+    threadId: "thread-recruiter-outreach",
+    from: "sam.recruiter@examplesoft.com",
+    fromDomain: "examplesoft.com",
+    subject: "Opportunity: Applied AI Engineer at Examplesoft",
+    snippet: "I came across your profile.",
+    body: "Hi Alex, I came across your profile and wanted to reach out about an Applied AI Engineer position at Examplesoft. Let me know if you'd like to chat. Thanks, Sam",
+    receivedAt: "2026-09-15T09:00:00Z",
+  }),
+
   // Same company/role as linkedinConfirmation, but ~4 months later — a
   // genuine second attempt (e.g. the first one went nowhere), not a
   // duplicate of the original application.

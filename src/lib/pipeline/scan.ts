@@ -12,7 +12,7 @@ import { Prisma, type ScanJob } from "@/generated/prisma";
 const CHUNK_SIZE = 15;
 
 function countsForOutcome(outcome: PipelineIngestResult["outcome"]) {
-  const relevant = outcome !== "IGNORED_ALREADY_PROCESSED" && outcome !== "IGNORED_IRRELEVANT" && outcome !== "IGNORED_JOB_ALERT";
+  const relevant = !outcome.startsWith("IGNORED_");
   const applicationFound = outcome === "APPLICATION_CREATED" || outcome === "SENT_TO_REVIEW";
   const needsReview = outcome === "SENT_TO_REVIEW";
   return { relevant, applicationFound, needsReview };
@@ -114,9 +114,21 @@ export async function continueInitialScan(params: {
     // time — the resolver does a check-then-act read/write against shared
     // Application rows, and concurrent ingestion could race two emails
     // destined for the same application.
-    const emails = await Promise.all(claim.chunk.map((id) => provider.fetchEmailById(id)));
+    // Skip the Gmail download entirely for messages we've already processed
+    // (rescans, retries) — one indexed lookup instead of a full message fetch
+    // each. They still count as scanned.
+    const alreadyDone = new Set(
+      (
+        await prisma.processedEmail.findMany({
+          where: { connectedAccountId, providerMessageId: { in: claim.chunk } },
+          select: { providerMessageId: true },
+        })
+      ).map((p) => p.providerMessageId)
+    );
+    const toFetch = claim.chunk.filter((id) => !alreadyDone.has(id));
+    const emails = await Promise.all(toFetch.map((id) => provider.fetchEmailById(id)));
 
-    let scanned = 0;
+    let scanned = alreadyDone.size;
     let relevantCount = 0;
     let applicationsFound = 0;
     let needsReviewCount = 0;

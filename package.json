@@ -13,7 +13,8 @@
     "db:generate": "prisma generate",
     "db:push": "node scripts/prisma-migrate-cli.mjs db push",
     "db:migrate": "node scripts/prisma-migrate-cli.mjs migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "ai:eval": "tsx --conditions react-server scripts/ai-eval.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

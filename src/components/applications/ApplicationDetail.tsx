@@ -8,6 +8,7 @@ import { StatusBadge } from "./StatusBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ApplicationTimeline } from "./ApplicationTimeline";
 import { applicationStatusValues } from "@/lib/validation";
+import { ReanalyzeButton } from "./ReanalyzeButton";
 
 export function ApplicationDetail({
   application,
@@ -101,12 +102,17 @@ export function ApplicationDetail({
         )}
 
         {!editing ? (
-          <button
-            onClick={() => setEditing(true)}
-            className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-700"
-          >
-            Edit details
-          </button>
+          <div className="mt-4 flex items-start gap-4">
+            <button
+              onClick={() => setEditing(true)}
+              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+            >
+              Edit details
+            </button>
+            {events.some((e) => e.emailId) && (
+              <ReanalyzeButton applicationId={application.id} onDetailPage />
+            )}
+          </div>
         ) : (
           <form onSubmit={handleSave} className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4">
             <div className="grid grid-cols-2 gap-3">

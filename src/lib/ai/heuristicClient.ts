@@ -7,8 +7,13 @@ import type { AIClient } from "./types";
 /**
  * Rule-based classifier + extractor. Used as the default AI client when
  * GEMINI_API_KEY isn't configured (local dev, CI, tests) and as the fallback
- * whenever the Gemini call itself fails, so a transient AI outage degrades
- * gracefully instead of losing the email entirely.
+ * whenever the Gemini call itself fails (quota, outage), so a transient AI
+ * problem degrades gracefully instead of losing the email entirely.
+ *
+ * It is deliberately conservative: anything it can't pin down becomes null at
+ * low confidence (-> Review Queue) rather than a guess. Captured values never
+ * span a sentence boundary — an earlier version's lazy `.+?` ran across
+ * sentences and produced a "company" of "the earliest" at 90% confidence.
  */
 
 interface KeywordRule {
@@ -44,6 +49,8 @@ const KEYWORD_RULES: KeywordRule[] = [
       /invite you to interview/i,
       /interview with you/i,
       /like to interview/i,
+      /interview invite\b/i,
+      /scheduled an interview/i,
     ],
   },
   {
@@ -81,10 +88,15 @@ function classifyByKeywords(email: RawEmail): ClassificationResult {
   const text = `${email.subject} ${email.body}`;
   for (const rule of KEYWORD_RULES) {
     if (rule.patterns.some((re) => re.test(text))) {
-      return { eventType: rule.eventType, confidence: rule.confidence, reasoning: "keyword-rule" };
+      return {
+        eventType: rule.eventType,
+        confidence: rule.confidence,
+        reasoning: "keyword-rule",
+        engine: "heuristic",
+      };
     }
   }
-  return { eventType: "IRRELEVANT", confidence: 0.55, reasoning: "no-keyword-match" };
+  return { eventType: "IRRELEVANT", confidence: 0.55, reasoning: "no-keyword-match", engine: "heuristic" };
 }
 
 const EVENT_TYPE_TO_STATUS: Partial<Record<EmailEventType, ApplicationStatus>> = {
@@ -101,22 +113,41 @@ interface ExtractionPattern {
   confidence: number;
 }
 
-// Tried in order; first match wins. Named capture groups: role, company, date, ats.
+// A role/company capture must stay inside one sentence: no periods, no newlines.
+const ROLE = String.raw`(?<role>[^.\n]{2,100}?)`;
+const COMPANY = String.raw`(?<company>[A-Za-z0-9&.,' -]+?)`;
+
+// Tried in order; first match wins. Named capture groups: role, company, ats.
 const EXTRACTION_PATTERNS: ExtractionPattern[] = [
-  { regex: /next step for your (?<role>.+?) application \(Job ID: (?<ats>[A-Za-z0-9-]+)\) at (?<company>[A-Za-z0-9&.,' -]+?),/i, confidence: 0.93 },
-  { regex: /applying for (?<role>.+?) at (?<company>[A-Za-z0-9&.,' -]+?)\.\s*We have received your application \(Job ID:\s*(?<ats>[A-Za-z0-9-]+)\)/i, confidence: 0.93 },
-  { regex: /applying for (?<role>.+?) at (?<company>[A-Za-z0-9&.,' -]+?)\./i, confidence: 0.9 },
-  { regex: /position of (?<role>.+?) at (?<company>[A-Za-z0-9&.,'() -]+?) has been sent/i, confidence: 0.9 },
-  { regex: /sent to (?<company>[A-Za-z0-9&.,' -]+?)\..*?for the (?<role>.+?) position/is, confidence: 0.9 },
-  { regex: /referral for the (?<role>.+?) role at (?<company>[A-Za-z0-9&.,' -]+?) today/i, confidence: 0.85 },
-  { regex: /applying to the (?<role>.+?) role at (?<company>[A-Za-z0-9&.,' -]+?)\./i, confidence: 0.9 },
-  { regex: /interview with you for the (?<role>.+?) position at (?<company>[A-Za-z0-9&.,' -]+?)\./i, confidence: 0.9 },
-  { regex: /interest in the (?<role>.+?) role at (?<company>[A-Za-z0-9&.,' -]+?)\./i, confidence: 0.9 },
-  { regex: /offer you the position of (?<role>.+?) at (?<company>[A-Za-z0-9&.,' -]+?)\./i, confidence: 0.9 },
+  {
+    regex: new RegExp(String.raw`next step for your ${ROLE} application \(Job ID: (?<ats>[A-Za-z0-9-]+)\) at ${COMPANY},`, "i"),
+    confidence: 0.93,
+  },
+  {
+    regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.\s*We have received your application \(Job ID:\s*(?<ats>[A-Za-z0-9-]+)\)`, "i"),
+    confidence: 0.93,
+  },
+  { regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  // "...applying for the role of Technology Analyst." — the employer is not in the sentence.
+  { regex: new RegExp(String.raw`applying for the role of ${ROLE}(?:\.|,| at )`, "i"), confidence: 0.85 },
+  {
+    regex: new RegExp(String.raw`position of ${ROLE} at (?<company>[A-Za-z0-9&.,'() -]+?) has been sent`, "i"),
+    confidence: 0.9,
+  },
+  { regex: new RegExp(String.raw`sent to ${COMPANY}\..*?for the ${ROLE} position`, "is"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`referral for the ${ROLE} role at ${COMPANY} today`, "i"), confidence: 0.85 },
+  { regex: new RegExp(String.raw`applying to the ${ROLE} role at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`interview with you for the ${ROLE} position at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`interest in the ${ROLE} role at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`offer you the position of ${ROLE} at ${COMPANY}\.`, "i"), confidence: 0.9 },
 ];
 
 const DATE_PATTERN = /on ([A-Za-z]+ \d{1,2},? \d{4}|\d{1,2} [A-Za-z]+ \d{4})/;
-const ATS_ID_PATTERN = /Job ID:\s*([A-Za-z0-9-]+)/i;
+const ATS_ID_PATTERN =
+  /(?:Job ID|Candidate ID|Application ID|Requisition ID|Reference (?:No|Number)):?\s*([A-Za-z0-9-]+)/i;
+
+// "Regarding your application with Infosys" — the employer is often only in the subject.
+const SUBJECT_COMPANY_PATTERN = /application (?:with|to|at) (?<company>[A-Z][A-Za-z0-9&,'() -]{1,60}?)\s*$/;
 
 function parseLooseDate(raw: string): string | null {
   const cleaned = raw.replace(",", "");
@@ -131,31 +162,36 @@ function extractByPatterns(email: RawEmail): {
   atsIdentifier: string | null;
   confidence: number;
 } {
-  // Body only (not subject+body): several mock/real subjects repeat phrases like
-  // "applying for <role>" without the trailing "at <company>", and concatenating
-  // would let the lazy quantifiers below run past the sentence boundary.
+  // Body only (not subject+body): several subjects repeat phrases like
+  // "applying for <role>" without the trailing "at <company>".
   const text = email.body;
+  const atsFromText = text.match(ATS_ID_PATTERN)?.[1] ?? email.subject.match(ATS_ID_PATTERN)?.[1] ?? null;
+  const dateMatch = text.match(DATE_PATTERN);
+  const applicationDate = dateMatch ? parseLooseDate(dateMatch[1]) : null;
+  const companyFromSubject = email.subject.match(SUBJECT_COMPANY_PATTERN)?.groups?.company?.trim() ?? null;
 
   for (const { regex, confidence } of EXTRACTION_PATTERNS) {
     const match = text.match(regex);
     if (match?.groups) {
-      const company = match.groups.company?.trim().replace(/[.,]$/, "") ?? null;
-      const role = match.groups.role?.trim().replace(/[.,]$/, "") ?? null;
-      const atsFromPattern = match.groups.ats?.trim() ?? null;
-      const atsFromText = text.match(ATS_ID_PATTERN)?.[1] ?? null;
-      const dateMatch = text.match(DATE_PATTERN);
-      const applicationDate = dateMatch ? parseLooseDate(dateMatch[1]) : null;
       return {
-        company,
-        role,
+        company: match.groups.company?.trim().replace(/[.,]$/, "") ?? companyFromSubject,
+        role: match.groups.role?.trim().replace(/[.,]$/, "") ?? null,
         applicationDate,
-        atsIdentifier: atsFromPattern ?? atsFromText,
+        atsIdentifier: match.groups.ats?.trim() ?? atsFromText,
         confidence,
       };
     }
   }
 
-  return { company: null, role: null, applicationDate: null, atsIdentifier: null, confidence: 0.35 };
+  // No role pattern matched — keep whatever structured hints we do have, at
+  // low confidence, so the item lands in the Review Queue with some context.
+  return {
+    company: companyFromSubject,
+    role: null,
+    applicationDate,
+    atsIdentifier: atsFromText,
+    confidence: companyFromSubject || atsFromText ? 0.5 : 0.35,
+  };
 }
 
 export const heuristicClient: AIClient = {

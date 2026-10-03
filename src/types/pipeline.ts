@@ -22,6 +22,13 @@ export interface ClassificationResult {
   eventType: EmailEventType;
   confidence: number;
   reasoning?: string;
+  /**
+   * Which stage actually produced this result. Lets callers tell a real model
+   * answer from a silent fall-back to the rule-based heuristics (e.g. when the
+   * Gemini quota is exhausted) — re-analysis refuses to overwrite data with the
+   * weaker fallback.
+   */
+  engine?: "deterministic" | "gemini" | "heuristic";
 }
 
 export interface ExtractionResult {
@@ -41,6 +48,7 @@ export interface PipelineIngestResult {
     | "IGNORED_ALREADY_PROCESSED"
     | "IGNORED_IRRELEVANT"
     | "IGNORED_JOB_ALERT"
+    | "IGNORED_RECRUITER_OUTREACH"
     | "APPLICATION_CREATED"
     | "EVENT_ADDED_NO_NOTIFICATION"
     | "EVENT_ADDED_WITH_NOTIFICATION"

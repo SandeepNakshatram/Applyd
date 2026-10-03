@@ -1,5 +1,6 @@
 import type { ApplicationSource } from "@/generated/prisma";
 import type { RawEmail } from "@/types/pipeline";
+import { ATS_DOMAINS, domainMatches } from "@/lib/jobDomains";
 
 /**
  * Deterministic source detection (spec section 8). This is the single source
@@ -9,19 +10,6 @@ import type { RawEmail } from "@/types/pipeline";
 
 const LINKEDIN_DOMAINS = ["linkedin.com"];
 const NAUKRI_DOMAINS = ["naukri.com"];
-const ATS_DOMAINS = [
-  "greenhouse.io",
-  "lever.co",
-  "myworkdayjobs.com",
-  "workday.com",
-  "smartrecruiters.com",
-  "icims.com",
-  "bamboohr.com",
-  "ashbyhq.com",
-  "jobvite.com",
-  "successfactors.com",
-  "taleo.net",
-];
 
 const COMPANY_SENDER_LOCAL_PARTS = [
   "careers",
@@ -44,7 +32,7 @@ export function detectSource(email: RawEmail): ApplicationSource {
 
   if (LINKEDIN_DOMAINS.some((d) => domain.endsWith(d))) return "LINKEDIN";
   if (NAUKRI_DOMAINS.some((d) => domain.endsWith(d))) return "NAUKRI";
-  if (ATS_DOMAINS.some((d) => domain.endsWith(d))) return "COMPANY_WEBSITE";
+  if (domainMatches(domain, ATS_DOMAINS)) return "COMPANY_WEBSITE";
 
   if (REFERRAL_KEYWORDS.some((k) => bodyLower.includes(k))) return "REFERRAL";
 

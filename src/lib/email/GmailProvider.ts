@@ -2,6 +2,7 @@ import "server-only";
 import { google, gmail_v1 } from "googleapis";
 import type { EmailProvider } from "./EmailProvider";
 import type { RawEmail } from "@/types/pipeline";
+import { ATS_DOMAINS, domainMatches } from "@/lib/jobDomains";
 
 /**
  * Deterministic pre-filter applied at the Gmail search-query level so we never
@@ -10,21 +11,7 @@ import type { RawEmail } from "@/types/pipeline";
  * precision); the classifier stage narrows it down and is allowed to say
  * IRRELEVANT / JOB_ALERT.
  */
-const JOB_SENDER_DOMAINS = [
-  "linkedin.com",
-  "naukri.com",
-  "greenhouse.io",
-  "lever.co",
-  "myworkdayjobs.com",
-  "workday.com",
-  "smartrecruiters.com",
-  "icims.com",
-  "bamboohr.com",
-  "ashbyhq.com",
-  "jobvite.com",
-  "successfactors.com",
-  "taleo.net",
-];
+const JOB_SENDER_DOMAINS = ["linkedin.com", "naukri.com", ...ATS_DOMAINS];
 
 const SUBJECT_KEYWORDS = [
   "application",
@@ -197,7 +184,7 @@ export class GmailProvider implements EmailProvider {
 }
 
 function matchesRelevancePrefilter(email: RawEmail): boolean {
-  if (JOB_SENDER_DOMAINS.some((d) => email.fromDomain.endsWith(d))) return true;
+  if (domainMatches(email.fromDomain, JOB_SENDER_DOMAINS)) return true;
   const subjectLower = email.subject.toLowerCase();
   return SUBJECT_KEYWORDS.some((k) => subjectLower.includes(k));
 }

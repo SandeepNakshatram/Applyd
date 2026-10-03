@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ApplicationCard } from "@/components/applications/ApplicationCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ReanalyzeAllButton } from "@/components/applications/ReanalyzeAllButton";
+import { reviewReason } from "@/lib/reviewReason";
 
 export default async function ReviewPage() {
   const session = await auth();
@@ -40,7 +41,12 @@ export default async function ReviewPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {applications.map((app) => (
-              <ApplicationCard key={app.id} application={app} sourceEmailId={app.events[0]?.emailId ?? null} />
+              <ApplicationCard
+                key={app.id}
+                application={app}
+                sourceEmailId={app.events[0]?.emailId ?? null}
+                reason={reviewReason(app, app.events[0]?.extractedData)}
+              />
             ))}
           </div>
         )}

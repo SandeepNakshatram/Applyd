@@ -8,6 +8,7 @@ import { StatusBadge } from "./StatusBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ApplicationTimeline } from "./ApplicationTimeline";
 import { applicationStatusValues } from "@/lib/validation";
+import { displayCompany, displayRole, isUnknownCompany, isUnknownRole } from "@/lib/placeholders";
 import { ReanalyzeButton } from "./ReanalyzeButton";
 
 export function ApplicationDetail({
@@ -35,7 +36,10 @@ export function ApplicationDetail({
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    // Blank company/role leave the stored value alone (the API rejects empty strings).
     await patch({
+      company: String(form.get("company") ?? "").trim() || undefined,
+      role: String(form.get("role") ?? "").trim() || undefined,
       status: form.get("status"),
       nextAction: form.get("nextAction") || null,
       nextActionDate: form.get("nextActionDate") || null,
@@ -49,8 +53,8 @@ export function ApplicationDetail({
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-900">{application.role}</h1>
-            <p className="text-sm text-slate-500">{application.company}</p>
+            <h1 className="text-xl font-bold text-slate-900">{displayRole(application.role)}</h1>
+            <p className="text-sm text-slate-500">{displayCompany(application.company)}</p>
           </div>
           <div className="flex gap-2">
             <SourceBadge source={application.source} />
@@ -115,6 +119,26 @@ export function ApplicationDetail({
           </div>
         ) : (
           <form onSubmit={handleSave} className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Company</label>
+                <input
+                  name="company"
+                  defaultValue={isUnknownCompany(application.company) ? "" : application.company}
+                  placeholder="Company"
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Role</label>
+                <input
+                  name="role"
+                  defaultValue={isUnknownRole(application.role) ? "" : application.role}
+                  placeholder="Role (as on the job post)"
+                  className="input"
+                />
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-600">Status</label>

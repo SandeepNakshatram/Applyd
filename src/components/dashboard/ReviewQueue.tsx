@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Application } from "@/generated/prisma";
 import { SourceBadge } from "@/components/applications/SourceBadge";
+import { describeApplication } from "@/lib/placeholders";
 
 export function ReviewQueueBanner({ applications }: { applications: Application[] }) {
   if (applications.length === 0) return null;
@@ -19,7 +20,7 @@ export function ReviewQueueBanner({ applications }: { applications: Application[
         {applications.slice(0, 3).map((app) => (
           <li key={app.id} className="flex items-center justify-between text-sm text-amber-900">
             <span className="truncate">
-              {app.company} — {app.role}
+              {describeApplication(app.company, app.role)}
             </span>
             <SourceBadge source={app.source} />
           </li>

@@ -115,31 +115,36 @@ interface ExtractionPattern {
 
 // A role/company capture must stay inside one sentence: no periods, no newlines.
 const ROLE = String.raw`(?<role>[^.\n]{2,100}?)`;
-const COMPANY = String.raw`(?<company>[A-Za-z0-9&.,' -]+?)`;
+const COMPANY = String.raw`(?<company>[\p{L}\p{N}&.,' -]+?)`;
 
 // Tried in order; first match wins. Named capture groups: role, company, ats.
 const EXTRACTION_PATTERNS: ExtractionPattern[] = [
   {
-    regex: new RegExp(String.raw`next step for your ${ROLE} application \(Job ID: (?<ats>[A-Za-z0-9-]+)\) at ${COMPANY},`, "i"),
+    regex: new RegExp(String.raw`next step for your ${ROLE} application \(Job ID: (?<ats>[A-Za-z0-9-]+)\) at ${COMPANY},`, "iu"),
     confidence: 0.93,
   },
   {
-    regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.\s*We have received your application \(Job ID:\s*(?<ats>[A-Za-z0-9-]+)\)`, "i"),
+    regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.\s*We have received your application \(Job ID:\s*(?<ats>[A-Za-z0-9-]+)\)`, "iu"),
     confidence: 0.93,
   },
-  { regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`applying for ${ROLE} at ${COMPANY}\.`, "iu"), confidence: 0.9 },
   // "...applying for the role of Technology Analyst." — the employer is not in the sentence.
-  { regex: new RegExp(String.raw`applying for the role of ${ROLE}(?:\.|,| at )`, "i"), confidence: 0.85 },
+  { regex: new RegExp(String.raw`applying for the role of ${ROLE}(?:\.|,| at )`, "iu"), confidence: 0.85 },
   {
-    regex: new RegExp(String.raw`position of ${ROLE} at (?<company>[A-Za-z0-9&.,'() -]+?) has been sent`, "i"),
+    regex: new RegExp(String.raw`position of ${ROLE} at (?<company>[\p{L}\p{N}&.,'() -]+?) has been sent`, "iu"),
     confidence: 0.9,
   },
-  { regex: new RegExp(String.raw`sent to ${COMPANY}\..*?for the ${ROLE} position`, "is"), confidence: 0.9 },
-  { regex: new RegExp(String.raw`referral for the ${ROLE} role at ${COMPANY} today`, "i"), confidence: 0.85 },
-  { regex: new RegExp(String.raw`applying to the ${ROLE} role at ${COMPANY}\.`, "i"), confidence: 0.9 },
-  { regex: new RegExp(String.raw`interview with you for the ${ROLE} position at ${COMPANY}\.`, "i"), confidence: 0.9 },
-  { regex: new RegExp(String.raw`interest in the ${ROLE} role at ${COMPANY}\.`, "i"), confidence: 0.9 },
-  { regex: new RegExp(String.raw`offer you the position of ${ROLE} at ${COMPANY}\.`, "i"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`sent to ${COMPANY}\..*?for the ${ROLE} position`, "isu"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`referral for the ${ROLE} role at ${COMPANY} today`, "iu"), confidence: 0.85 },
+  { regex: new RegExp(String.raw`applying to the ${ROLE} role at ${COMPANY}\.`, "iu"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`interview with you for the ${ROLE} position at ${COMPANY}\.`, "iu"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`interest in the ${ROLE} role at ${COMPANY}\.`, "iu"), confidence: 0.9 },
+  { regex: new RegExp(String.raw`offer you the position of ${ROLE} at ${COMPANY}\.`, "iu"), confidence: 0.9 },
+  // "Thanks for applying to Schrödinger." — ATS confirmations often name only the employer.
+  {
+    regex: new RegExp(String.raw`(?:thank you for|thanks for) applying (?:to|at|with) (?<company>[\p{L}\p{N}&' -]+?)[.!,]`, "iu"),
+    confidence: 0.8,
+  },
 ];
 
 const DATE_PATTERN = /on ([A-Za-z]+ \d{1,2},? \d{4}|\d{1,2} [A-Za-z]+ \d{4})/;
@@ -147,7 +152,7 @@ const ATS_ID_PATTERN =
   /(?:Job ID|Candidate ID|Application ID|Requisition ID|Reference (?:No|Number)):?\s*([A-Za-z0-9-]+)/i;
 
 // "Regarding your application with Infosys" — the employer is often only in the subject.
-const SUBJECT_COMPANY_PATTERN = /application (?:with|to|at) (?<company>[A-Z][A-Za-z0-9&,'() -]{1,60}?)\s*$/;
+const SUBJECT_COMPANY_PATTERN = /application (?:with|to|at) (?<company>\p{Lu}[\p{L}\p{N}&,'() -]{1,60}?)\s*$/u;
 
 function parseLooseDate(raw: string): string | null {
   const cleaned = raw.replace(",", "");

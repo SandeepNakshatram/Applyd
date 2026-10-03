@@ -268,16 +268,54 @@ describe("real-world mail that earlier versions got wrong", () => {
   });
 });
 
+describe("a confirmation that names no role", () => {
+  it("goes straight to the dashboard (not the review queue) as 'role not specified'", async () => {
+    const result = await ingest(mockEmails.greenhouseConfirmation);
+    expect(result.outcome).toBe("APPLICATION_CREATED");
+
+    const application = await prisma.application.findUniqueOrThrow({ where: { id: result.applicationId } });
+    expect(application.company).toBe("Schrödinger");
+    expect(application.role).toBe("Unknown role");
+    expect(application.reviewState).toBe("NONE");
+    expect(application.source).toBe("COMPANY_WEBSITE");
+  });
+
+  it("learns the role when a later email finally names it, instead of creating a duplicate", async () => {
+    const result = await ingest(mockEmails.schrodingerInterviewInvite);
+    expect(result.outcome).toBe("EVENT_ADDED_WITH_NOTIFICATION");
+
+    const apps = await prisma.application.findMany({ where: { userId, company: "Schrödinger" } });
+    expect(apps).toHaveLength(1);
+    expect(apps[0].role).toBe("Software Developer - Python");
+    expect(apps[0].currentStatus).toBe("INTERVIEW");
+  });
+});
+
+describe("the same employer named two ways is still one application", () => {
+  it("links 'Globex Private Limited' and 'Globex' instead of creating a duplicate", async () => {
+    const first = await ingest(mockEmails.globexConfirmation);
+    expect(first.outcome).toBe("APPLICATION_CREATED");
+    const created = await prisma.application.findUniqueOrThrow({ where: { id: first.applicationId } });
+    expect(created.company).toBe("Globex Private Limited");
+
+    const second = await ingest(mockEmails.globexInterview);
+    expect(second.outcome).toBe("EVENT_ADDED_WITH_NOTIFICATION");
+    expect(second.applicationId).toBe(first.applicationId);
+
+    expect(await prisma.application.count({ where: { userId, company: { startsWith: "Globex" } } })).toBe(1);
+  });
+});
+
 describe("notifications", () => {
   it("created a NEW_APPLICATION notification for each newly discovered application", async () => {
     const count = await prisma.notification.count({ where: { userId, type: "NEW_APPLICATION" } });
-    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon, Razorpay-reapplication, Infosys = 8.
-    expect(count).toBe(8);
+    // Razorpay, Microsoft, TCS, Flipkart, PhonePe, Amazon, Razorpay-reapplication, Infosys, Schrödinger, Globex = 10.
+    expect(count).toBe(10);
   });
 
   it("created STATUS_CHANGE notifications for the screening/assessment/interview updates", async () => {
     const count = await prisma.notification.count({ where: { userId, type: "STATUS_CHANGE" } });
-    expect(count).toBe(4); // Razorpay screening + interview, Microsoft assessment, Infosys interview.
+    expect(count).toBe(6); // Razorpay screening + interview, Microsoft assessment, Infosys/Schrödinger/Globex interviews.
   });
 
   it("created a REVIEW_NEEDED notification for the ambiguous application", async () => {
@@ -287,6 +325,6 @@ describe("notifications", () => {
 
   it("never created a notification for the job alert, irrelevant mail, or the duplicate", async () => {
     const total = await prisma.notification.count({ where: { userId } });
-    expect(total).toBe(8 + 4 + 1);
+    expect(total).toBe(10 + 6 + 1);
   });
 });

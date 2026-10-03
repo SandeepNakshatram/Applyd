@@ -1,6 +1,7 @@
 import "server-only";
 import type { Application, EmailEventType, Notification, NotificationType } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
+import { describeApplication } from "@/lib/placeholders";
 
 const EVENT_TITLES: Partial<Record<EmailEventType, string>> = {
   APPLICATION_CONFIRMATION: "New application found",
@@ -39,7 +40,7 @@ export async function notifyNewApplication(
     userId,
     type: "NEW_APPLICATION",
     title: "New application found",
-    message: `${application.company} — ${application.role}`,
+    message: describeApplication(application.company, application.role),
     applicationId: application.id,
   });
 }
@@ -53,7 +54,7 @@ export async function notifyStatusChange(
     userId,
     type: "STATUS_CHANGE",
     title: EVENT_TITLES[eventType] ?? "Application updated",
-    message: `${application.company} — ${application.role}`,
+    message: describeApplication(application.company, application.role),
     applicationId: application.id,
   });
 }
@@ -66,7 +67,7 @@ export async function notifyReviewNeeded(
     userId,
     type: "REVIEW_NEEDED",
     title: "Needs your review",
-    message: `${application.company} — ${application.role}`,
+    message: describeApplication(application.company, application.role),
     applicationId: application.id,
   });
 }
@@ -79,7 +80,7 @@ export async function notifyFollowUpDue(
     userId,
     type: "FOLLOW_UP_DUE",
     title: "Follow-up due",
-    message: `${application.company} — ${application.role}`,
+    message: describeApplication(application.company, application.role),
     applicationId: application.id,
   });
 }

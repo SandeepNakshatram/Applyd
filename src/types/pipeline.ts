@@ -41,6 +41,8 @@ export interface ExtractionResult {
   confidence: number;
   /** Job/application/ATS identifiers found in the email, used by the resolver. */
   atsIdentifier: string | null;
+  /** True when the company was guessed from the sender's domain rather than read from the email. */
+  companyInferred?: boolean;
 }
 
 export interface PipelineIngestResult {

@@ -1,5 +1,6 @@
 import type { EmailEventType } from "@/generated/prisma";
 import type { ExtractionResult, RawEmail } from "@/types/pipeline";
+import { ATS_DOMAINS, JOB_BOARD_DOMAINS, MAIL_PROVIDER_DOMAINS, domainMatches } from "@/lib/jobDomains";
 
 /**
  * Last-line defences applied to every extraction regardless of which engine
@@ -29,13 +30,7 @@ function credible(value: string | null, maxChars: number, maxWords: number): str
 }
 
 /** Domains that say nothing about the employer (job boards, ATS vendors, mail providers). */
-const NON_EMPLOYER_DOMAINS = new Set([
-  "linkedin.com", "naukri.com", "foundit.in", "monster.com", "indeed.com", "glassdoor.com",
-  "shine.com", "timesjobs.com", "instahyre.com", "wellfound.com", "cutshort.io", "hirist.com",
-  "greenhouse.io", "lever.co", "myworkdayjobs.com", "workday.com", "smartrecruiters.com",
-  "icims.com", "bamboohr.com", "ashbyhq.com", "jobvite.com", "successfactors.com", "taleo.net",
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me",
-]);
+const NON_EMPLOYER_DOMAINS = [...ATS_DOMAINS, ...JOB_BOARD_DOMAINS, ...MAIL_PROVIDER_DOMAINS];
 
 const SECOND_LEVEL_TLDS = new Set(["co", "com", "org", "net", "ac", "gov", "edu"]);
 
@@ -49,8 +44,7 @@ export function companyFromSenderDomain(fromDomain: string): string | null {
   const tld = parts[parts.length - 1];
   const sld = parts[parts.length - 2];
   const label = tld.length === 2 && SECOND_LEVEL_TLDS.has(sld) && parts.length >= 3 ? parts[parts.length - 3] : sld;
-  const registrable = parts.slice(-(label === sld ? 2 : 3)).join(".");
-  if (NON_EMPLOYER_DOMAINS.has(registrable) || NON_EMPLOYER_DOMAINS.has(domain)) return null;
+  if (domainMatches(domain, NON_EMPLOYER_DOMAINS)) return null;
   if (!/^[a-z0-9-]{2,}$/.test(label)) return null;
 
   return label
@@ -82,6 +76,7 @@ const DOMAIN_HINT_UNCORROBORATED_MAX = 0.6;
 
 export function postProcessExtraction(email: RawEmail, extraction: ExtractionResult): ExtractionResult {
   let { company, role, confidence } = extraction;
+  let companyInferred = false;
 
   const cleanCompany = credible(company, MAX_COMPANY_CHARS, MAX_COMPANY_WORDS);
   const cleanRole = credible(role, MAX_ROLE_CHARS, MAX_ROLE_WORDS);
@@ -98,6 +93,7 @@ export function postProcessExtraction(email: RawEmail, extraction: ExtractionRes
     const hinted = companyFromSenderDomain(email.fromDomain);
     if (hinted) {
       company = hinted;
+      companyInferred = true;
       const corroborated = !discarded && Boolean(extraction.atsIdentifier || role);
       confidence = corroborated
         ? DOMAIN_HINT_CORROBORATED
@@ -105,5 +101,5 @@ export function postProcessExtraction(email: RawEmail, extraction: ExtractionRes
     }
   }
 
-  return { ...extraction, company, role, confidence };
+  return { ...extraction, company, role, confidence, ...(companyInferred ? { companyInferred } : {}) };
 }

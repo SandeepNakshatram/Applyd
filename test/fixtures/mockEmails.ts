@@ -174,6 +174,53 @@ export const mockEmails = {
     receivedAt: "2026-09-20T07:00:00Z",
   }),
 
+  // ATS "thanks for applying" mail: the application certainly exists, but the job title isn't in it
+  // (it was only on the job page). Sender is greenhouse-mail.io, not greenhouse.io.
+  greenhouseConfirmation: email({
+    providerMessageId: "msg-schrodinger-confirmation-1",
+    threadId: "thread-schrodinger",
+    from: "no-reply@us.greenhouse-mail.io",
+    fromDomain: "us.greenhouse-mail.io",
+    subject: "Thank you for applying to Schrödinger",
+    snippet: "Thanks for applying to Schrödinger.",
+    body: "Alex, Thanks for applying to Schrödinger. Your application has been received and we will review it right away. If your application seems like a good fit for the position we will contact you soon. Regards, Schrödinger ** Please note: Do not reply to this email. This email is sent from an unattended mailbox. Replies will not be read.",
+    receivedAt: "2026-10-02T09:00:00Z",
+  }),
+
+  // A later mail from the same company that finally names the role.
+  schrodingerInterviewInvite: email({
+    providerMessageId: "msg-schrodinger-interview-1",
+    threadId: "thread-schrodinger-interview",
+    from: "careers@schrodinger.com",
+    fromDomain: "schrodinger.com",
+    subject: "Interview invitation",
+    snippet: "We would like to schedule an interview.",
+    body: "Hi Alex, We would like to schedule an interview with you for the Software Developer - Python position at Schrödinger. Please pick a slot using the link.",
+    receivedAt: "2026-10-05T09:00:00Z",
+  }),
+
+  // Same employer written two ways in two mails: with its legal suffix, then without.
+  globexConfirmation: email({
+    providerMessageId: "msg-globex-confirmation-1",
+    threadId: "thread-globex",
+    from: "careers@globex.example",
+    fromDomain: "globex.example",
+    subject: "Regarding your application with Globex Private Limited",
+    snippet: "Thank you for applying for the role of Data Analyst.",
+    body: "Hi Alex, Thank you for applying for the role of Data Analyst. We will be in touch. Regards, Talent Team",
+    receivedAt: "2026-09-18T08:00:00Z",
+  }),
+  globexInterview: email({
+    providerMessageId: "msg-globex-interview-1",
+    threadId: "thread-globex-interview",
+    from: "careers@globex.example",
+    fromDomain: "globex.example",
+    subject: "Interview invitation",
+    snippet: "We would like to schedule an interview.",
+    body: "Hi Alex, We would like to schedule an interview with you for the Data Analyst position at Globex. Please pick a slot.",
+    receivedAt: "2026-09-25T08:00:00Z",
+  }),
+
   // A school admissions mail: "application submitted", but not a job.
   mesaAdmissions: email({
     providerMessageId: "msg-admissions-1",

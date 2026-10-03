@@ -1,4 +1,5 @@
 import type { ClassificationResult, RawEmail } from "@/types/pipeline";
+import { ATS_DOMAINS, JOB_BOARD_DOMAINS, domainMatches } from "@/lib/jobDomains";
 
 /**
  * Deterministic pre-classification, run before any AI call. Three rules matter
@@ -62,21 +63,7 @@ const APPLICATION_SIGNAL_KEYWORDS = [
   "role at",
 ];
 
-const KNOWN_JOB_DOMAINS = [
-  "linkedin.com",
-  "naukri.com",
-  "greenhouse.io",
-  "lever.co",
-  "myworkdayjobs.com",
-  "workday.com",
-  "smartrecruiters.com",
-  "icims.com",
-  "bamboohr.com",
-  "ashbyhq.com",
-  "jobvite.com",
-  "successfactors.com",
-  "taleo.net",
-];
+const KNOWN_JOB_DOMAINS = [...ATS_DOMAINS, ...JOB_BOARD_DOMAINS];
 
 export function deterministicPreClassify(email: RawEmail): ClassificationResult | null {
   const text = `${email.subject} ${email.body}`;
@@ -101,7 +88,7 @@ export function deterministicPreClassify(email: RawEmail): ClassificationResult 
   }
 
   const domain = email.fromDomain.toLowerCase();
-  const isKnownJobDomain = KNOWN_JOB_DOMAINS.some((d) => domain.endsWith(d));
+  const isKnownJobDomain = domainMatches(domain, KNOWN_JOB_DOMAINS);
   const hasApplicationSignal = APPLICATION_SIGNAL_KEYWORDS.some((k) =>
     text.toLowerCase().includes(k)
   );

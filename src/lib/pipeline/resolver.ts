@@ -3,6 +3,8 @@ import { addDays } from "date-fns";
 import type { Application, EmailEventType, Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import type { ExtractionResult, PipelineIngestResult, RawEmail } from "@/types/pipeline";
+import { UNKNOWN_COMPANY, UNKNOWN_ROLE } from "@/lib/placeholders";
+import { roleKey, sameCompany } from "@/lib/companyKey";
 import { notifyNewApplication, notifyReviewNeeded, notifyStatusChange } from "./notifications";
 
 /** Below this, a resolved application is routed to the Review Queue instead of the dashboard. */
@@ -17,9 +19,6 @@ export const REVIEW_CONFIDENCE_THRESHOLD = 0.75;
  * on (and a real reapplication normally gets its own new ATS id anyway).
  */
 const REAPPLICATION_GAP_DAYS = 90;
-
-export const UNKNOWN_COMPANY = "Unknown company";
-export const UNKNOWN_ROLE = "Unknown role";
 
 interface NextAction {
   nextAction: string | null;
@@ -70,15 +69,21 @@ async function findMatchingApplication(
     if (byAts) return byAts;
   }
 
-  if (extraction.company && extraction.role) {
-    const byCompanyRole = await prisma.application.findFirst({
-      where: {
-        userId,
-        company: { equals: extraction.company, mode: "insensitive" },
-        role: { equals: extraction.role, mode: "insensitive" },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+  if (!extraction.company || extraction.company === UNKNOWN_COMPANY) return null;
+
+  // Company names are compared through companyKey (legal suffixes, accents and
+  // punctuation folded away), which can't be expressed as a SQL equality, so the
+  // user's applications are loaded once and filtered here — a user has tens of
+  // applications, not millions.
+  const company = extraction.company;
+  const sameCo = (await prisma.application.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  })).filter((a) => sameCompany(a.company, company));
+
+  if (extraction.role) {
+    const wanted = roleKey(extraction.role);
+    const byCompanyRole = sameCo.find((a) => roleKey(a.role) === wanted) ?? null;
 
     if (byCompanyRole) {
       if (extraction.eventType === "APPLICATION_CONFIRMATION" && byCompanyRole.appliedAt) {
@@ -97,21 +102,14 @@ async function findMatchingApplication(
     }
   }
 
-  if (extraction.company && extraction.company !== UNKNOWN_COMPANY) {
-    const openAtCompany = await prisma.application.findMany({
-      where: {
-        userId,
-        company: { equals: extraction.company, mode: "insensitive" },
-        currentStatus: { notIn: ["REJECTED", "WITHDRAWN"] },
-        reviewState: { not: "IGNORED" },
-        ...(extraction.role ? { role: { equals: UNKNOWN_ROLE, mode: "insensitive" as const } } : {}),
-      },
-      take: 2,
-    });
-    if (openAtCompany.length === 1) return openAtCompany[0];
-  }
-
-  return null;
+  const openAtCompany = sameCo.filter(
+    (a) =>
+      a.currentStatus !== "REJECTED" &&
+      a.currentStatus !== "WITHDRAWN" &&
+      a.reviewState !== "IGNORED" &&
+      (!extraction.role || a.role === UNKNOWN_ROLE)
+  );
+  return openAtCompany.length === 1 ? openAtCompany[0] : null;
 }
 
 export async function resolveApplication(params: {
@@ -203,8 +201,16 @@ export async function resolveApplication(params: {
     };
   }
 
+  // What earns a place in the Review Queue is real uncertainty: low confidence,
+  // no identifiable company, or a company we only guessed from the sender's
+  // domain. A *missing role* is not uncertainty — "Thanks for applying" mail from
+  // an ATS genuinely never names the job, the application certainly exists, and
+  // later mail (or the user, inline) can supply it. Those go straight to the
+  // dashboard as "Role not specified".
   const needsReview =
-    extraction.confidence < REVIEW_CONFIDENCE_THRESHOLD || !extraction.company || !extraction.role;
+    extraction.confidence < REVIEW_CONFIDENCE_THRESHOLD ||
+    !extraction.company ||
+    extraction.companyInferred === true;
   const nextAction = deriveNextAction(extraction.eventType, email.receivedAt);
 
   const application = await prisma.application.create({

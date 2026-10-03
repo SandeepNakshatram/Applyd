@@ -3,6 +3,7 @@ import { format } from "date-fns";
 import type { Application } from "@/generated/prisma";
 import { StatusBadge } from "./StatusBadge";
 import { SourceBadge } from "./SourceBadge";
+import { displayCompany, displayRole } from "@/lib/placeholders";
 
 export function ApplicationRow({ application }: { application: Application }) {
   return (
@@ -11,8 +12,8 @@ export function ApplicationRow({ application }: { application: Application }) {
       className="grid grid-cols-12 items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 hover:bg-slate-50"
     >
       <div className="col-span-4 min-w-0">
-        <p className="truncate font-medium text-slate-900">{application.company}</p>
-        <p className="truncate text-slate-500">{application.role}</p>
+        <p className="truncate font-medium text-slate-900">{displayCompany(application.company)}</p>
+        <p className="truncate text-slate-500">{displayRole(application.role)}</p>
       </div>
       <div className="col-span-2">
         <SourceBadge source={application.source} />

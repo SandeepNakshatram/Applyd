@@ -180,7 +180,7 @@ function buildCombinedPrompt(email: RawEmail): string {
 - IRRELEVANT: anything else. IMPORTANT: "applications" that are NOT for a job are IRRELEVANT — school/college/university admissions or entrance tests, exam registrations/results, scholarships, course enrolment, visas, loans, event tickets, newsletters.
 
 ## Extraction (leave every field null unless the email supports it — never guess)
-- company: the EMPLOYER. Use the explicit name; if the email is sent by the employer, take it from the subject, signature ("Infosys Limited"), or sender domain. NEVER use a job board / ATS (Naukri, LinkedIn, Foundit, Indeed, Workday, Greenhouse...) as the company.
+- company: the EMPLOYER, as its common short name WITHOUT legal suffixes — "Infosys", not "Infosys Limited" / "Infosys Pvt. Ltd."; "Acme", not "Acme, Inc.". Use the explicit name; if the email is sent by the employer, take it from the subject, signature ("Infosys Limited"), or sender domain. NEVER use a job board / ATS (Naukri, LinkedIn, Foundit, Indeed, Workday, Greenhouse...) as the company.
 - role: the job title only (e.g. "Technology Analyst"), not a sentence. null if the email doesn't state one.
 - applicationDate: ISO YYYY-MM-DD of when the person applied, only if stated; otherwise null.
 - status: APPLIED (applied, or asked to complete the application), SCREENING, ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN. Match it to the stage this email is about.

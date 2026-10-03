@@ -192,6 +192,43 @@ Docker needed), pushes the Prisma schema to it, and runs:
 Other verification run for this build: `npx tsc --noEmit` (clean),
 `npx eslint .` (clean), `npx next build` (succeeds).
 
+## What counts as an application
+
+The pipeline is deliberately strict about what becomes an `Application`:
+
+- **Job-board advertisements** ("you're invited to apply", "great match",
+  "Apply Now") are `JOB_ALERT` and never create anything.
+- **Non-job "applications"** — school admissions, exam registrations,
+  scholarships — are `IRRELEVANT`.
+- **Unsolicited recruiter outreach** is a lead, not something the user
+  submitted, so it only attaches to an application that already exists.
+- An update that names no role (an interview invite with just a candidate ID)
+  attaches to the user's single open application at that company; if there are
+  several candidates it does *not* guess.
+
+Both of the first two are caught by cheap deterministic rules
+([`deterministicClassifier.ts`](src/lib/ai/deterministicClassifier.ts)) before
+any model call, and the Gemini prompt states the same rules. Every extraction —
+from the model or the rule-based fallback — also passes through
+[`postprocess.ts`](src/lib/ai/postprocess.ts), which rejects implausible values
+(e.g. a sentence as a company name) and sends the item to the Review Queue
+rather than saving it at high confidence.
+
+**Re-analyze.** Review Queue cards, the application page, and "Re-analyze all"
+re-read the original email(s) with the current pipeline and replace the
+application: corrected, merged into the one it belongs to, or removed if it was
+never a job application. It does all network/AI work before deleting anything,
+and refuses (changing nothing) if the real model didn't answer, so a quota
+problem can't overwrite good data with the weaker rule-based fallback.
+
+`npm run ai:eval` runs the live model against realistic (anonymized) emails,
+including the shapes that earlier versions got wrong.
+
+**Gemini quota.** The free tier's daily request quota is tiny for the full
+"flash"/"pro" models (as low as 20/day) and far larger for the "lite" ones, so
+the default is `gemini-flash-lite-latest`; classification and extraction share
+one request per email.
+
 ## What's deliberately not built (spec section 26)
 
 No LinkedIn/Naukri scraping or browser automation, no job recommendations,

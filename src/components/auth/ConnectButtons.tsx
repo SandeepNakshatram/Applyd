@@ -3,14 +3,17 @@
 import { signIn } from "next-auth/react";
 import { Mail, PenLine } from "lucide-react";
 
-export function ConnectGmailButton() {
+export function ConnectGmailButton({ label = "Connect Gmail", compact = false }: { label?: string; compact?: boolean }) {
   return (
     <button
       onClick={() => signIn("google", { callbackUrl: "/scan" })}
-      className="flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
+      className={
+        "flex items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-slate-900 font-semibold text-white shadow-sm transition hover:bg-slate-700 " +
+        (compact ? "px-3 py-1.5 text-sm" : "px-6 py-3 text-sm")
+      }
     >
       <Mail className="h-4 w-4" />
-      Connect Gmail
+      {label}
     </button>
   );
 }

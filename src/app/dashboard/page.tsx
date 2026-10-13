@@ -10,6 +10,9 @@ import { ReviewQueueBanner } from "@/components/dashboard/ReviewQueue";
 import { AddApplicationButton } from "@/components/forms/AddApplicationButton";
 import { SyncStatus } from "@/components/dashboard/SyncStatus";
 import { isFollowUpDue } from "@/lib/followUps";
+import { needsReconnect } from "@/lib/syncError";
+import { ConnectGmailButton } from "@/components/auth/ConnectButtons";
+import { format } from "date-fns";
 import type { ReviewState } from "@/generated/prisma";
 
 // Stats only count records the user can see in the list (confirmed or
@@ -67,6 +70,20 @@ export default async function DashboardPage() {
           </div>
           <AddApplicationButton />
         </div>
+
+        {account && needsReconnect(account.lastSyncError) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+            <div>
+              <p className="text-sm font-semibold text-red-900">Applyd can no longer read your inbox</p>
+              <p className="text-xs text-red-800">
+                Google access has expired, so no new emails are being picked up
+                {account.lastSyncedAt ? ` since ${format(account.lastSyncedAt, "MMM d")}` : ""}. Reconnect to
+                catch up — nothing you already have will be lost.
+              </p>
+            </div>
+            <ConnectGmailButton label="Reconnect Gmail" compact />
+          </div>
+        )}
 
         <SummaryCards
           total={total}

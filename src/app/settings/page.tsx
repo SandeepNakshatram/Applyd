@@ -6,6 +6,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import { ConnectGmailButton } from "@/components/auth/ConnectButtons";
 import { DisconnectAccountButton } from "@/components/settings/DisconnectAccountButton";
 import { RescanButton } from "@/components/settings/RescanButton";
+import { needsReconnect } from "@/lib/syncError";
 import { SyncNowButton } from "@/components/settings/SyncNowButton";
 import { DeleteAccountButton } from "@/components/settings/DeleteAccountButton";
 
@@ -41,6 +42,9 @@ export default async function SettingsPage() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {needsReconnect(account.lastSyncError) && (
+                    <ConnectGmailButton label="Reconnect Gmail" compact />
+                  )}
                   <RescanButton />
                   <DisconnectAccountButton />
                 </div>

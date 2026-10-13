@@ -83,7 +83,7 @@ export async function continueInitialScan(params: {
   // transaction so two overlapping callers (e.g. a refreshed scan page
   // racing a still-running loop from before the refresh) can never both
   // claim the same message IDs — without this, both would ingest the same
-  // email concurrently and crash on ApplicationEvent's unique emailId
+  // email concurrently and crash on the (mailbox, emailId) unique
   // constraint instead of the normal "already processed" dedup path ever
   // getting a chance to run.
   const claim = await prisma.$transaction(async (tx) => {

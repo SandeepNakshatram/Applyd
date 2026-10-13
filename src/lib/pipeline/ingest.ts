@@ -57,7 +57,7 @@ export async function ingestAnalyzedEmail(params: {
     };
   }
 
-  const result = await resolveApplication({ userId, email, extraction, notify });
+  const result = await resolveApplication({ userId, connectedAccountId, email, extraction, notify });
 
   await prisma.processedEmail.create({
     data: {

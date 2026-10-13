@@ -204,6 +204,10 @@ model ApplicationEvent {
   status         ApplicationStatus?
   timestamp      DateTime
   source         ApplicationSource
+  /// Mailbox the email came from. Gmail message ids are only unique within one
+  /// mailbox, so de-duplication is per (connectedAccountId, emailId), never emailId
+  /// alone. Null for manually added events.
+  connectedAccountId String?
   emailId        String?
   extractedData  Json?
   confidence     Float             @default(1.0)
@@ -211,7 +215,7 @@ model ApplicationEvent {
 
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
-  @@unique([emailId])
+  @@unique([connectedAccountId, emailId])
   @@index([applicationId, timestamp])
   @@map("application_events")
 }

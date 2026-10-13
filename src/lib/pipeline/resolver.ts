@@ -137,12 +137,14 @@ async function findMatchingApplication(
 
 export async function resolveApplication(params: {
   userId: string;
+  /** The mailbox the email came from; scopes event de-duplication. */
+  connectedAccountId: string;
   email: RawEmail;
   extraction: ExtractionResult;
   /** false suppresses in-app notifications (re-analysis of something the user already saw). */
   notify?: boolean;
 }): Promise<PipelineIngestResult> {
-  const { userId, email, extraction, notify = true } = params;
+  const { userId, connectedAccountId, email, extraction, notify = true } = params;
   const source = extraction.source ?? "OTHER";
 
   const send = async <T extends { id: string }>(fn: () => Promise<T>): Promise<string | undefined> =>
@@ -194,6 +196,7 @@ export async function resolveApplication(params: {
         status: extraction.status,
         timestamp: email.receivedAt,
         source,
+        connectedAccountId,
         emailId: email.providerMessageId,
         extractedData: eventData(email, extraction),
         confidence: extraction.confidence,
@@ -302,6 +305,7 @@ export async function resolveApplication(params: {
       status: extraction.status,
       timestamp: email.receivedAt,
       source,
+      connectedAccountId,
       emailId: email.providerMessageId,
       extractedData: eventData(email, extraction),
       confidence: extraction.confidence,

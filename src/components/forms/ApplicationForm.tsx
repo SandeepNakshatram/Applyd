@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { applicationStatusValues, applicationSourceValues } from "@/lib/validation";
+import { STATUS_LABELS, SOURCE_LABELS } from "@/lib/labels";
 
 export function ApplicationForm({ onClose }: { onClose: () => void }) {
   const router = useRouter();
@@ -24,6 +25,7 @@ export function ApplicationForm({ onClose }: { onClose: () => void }) {
       nextAction: form.get("nextAction") || null,
       nextActionDate: form.get("nextActionDate") || null,
       notes: form.get("notes") || null,
+      jobUrl: String(form.get("jobUrl") ?? "").trim() || null,
     };
 
     const res = await fetch("/api/applications", {
@@ -35,7 +37,7 @@ export function ApplicationForm({ onClose }: { onClose: () => void }) {
     setSubmitting(false);
 
     if (!res.ok) {
-      setError("Please check the fields and try again.");
+      setError("Please check the fields (the job link must start with http:// or https://) and try again.");
       return;
     }
 
@@ -59,26 +61,27 @@ export function ApplicationForm({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <Field label="Application date" name="appliedAt" type="date" />
             <div>
-              <Label>Source</Label>
-              <select name="source" required className="input">
+              <Label required>Source</Label>
+              <select name="source" required defaultValue="OTHER" className="input">
                 {applicationSourceValues.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {SOURCE_LABELS[s]}
                   </option>
                 ))}
               </select>
             </div>
           </div>
           <div>
-            <Label>Status</Label>
-            <select name="status" required className="input">
+            <Label required>Status</Label>
+            <select name="status" required defaultValue="APPLIED" className="input">
               {applicationStatusValues.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {STATUS_LABELS[s]}
                 </option>
               ))}
             </select>
           </div>
+          <Field label="Job posting link" name="jobUrl" type="url" placeholder="https://…" />
           <div className="grid grid-cols-2 gap-3">
             <Field label="Next action" name="nextAction" />
             <Field label="Next action date" name="nextActionDate" type="date" />
@@ -112,8 +115,17 @@ export function ApplicationForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Label({ children }: { children: React.ReactNode }) {
-  return <label className="mb-1 block text-xs font-medium text-slate-600">{children}</label>;
+function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+  return (
+    <label className="mb-1 block text-xs font-medium text-slate-600">
+      {children}
+      {required && (
+        <span className="ml-0.5 text-red-600" aria-hidden="true">
+          *
+        </span>
+      )}
+    </label>
+  );
 }
 
 function Field({
@@ -121,16 +133,18 @@ function Field({
   name,
   type = "text",
   required,
+  placeholder,
 }: {
   label: string;
   name: string;
   type?: string;
   required?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div>
-      <Label>{label}</Label>
-      <input name={name} type={type} required={required} className="input" />
+      <Label required={required}>{label}</Label>
+      <input name={name} type={type} required={required} placeholder={placeholder} className="input" />
     </div>
   );
 }

@@ -25,7 +25,7 @@ export interface EmailProvider {
    * updated cursor. Must be safe to call repeatedly (idempotent) — the caller
    * still deduplicates by providerMessageId.
    */
-  syncIncremental(sinceCursor: string): Promise<{
+  syncIncremental(sinceCursor: string, sinceDate?: Date): Promise<{
     emails: RawEmail[];
     cursor: string;
   }>;

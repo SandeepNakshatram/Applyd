@@ -43,6 +43,10 @@ export interface ExtractionResult {
   atsIdentifier: string | null;
   /** True when the company was guessed from the sender's domain rather than read from the email. */
   companyInferred?: boolean;
+  /** What the email asks the recipient to do next ("Complete your application", "Join the interview"), if stated. */
+  nextAction?: string | null;
+  /** ISO date the next step happens/is due (interview time, assessment deadline, offer expiry), if stated. */
+  eventDate?: string | null;
 }
 
 export interface PipelineIngestResult {

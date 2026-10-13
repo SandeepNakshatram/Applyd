@@ -110,6 +110,10 @@ model ConnectedAccount {
   scopes                String[]
   historyId             String?
   lastSyncedAt          DateTime?
+  /// Last time a sync was *attempted* (throttles opportunistic syncs) and how it
+  /// ended, so a failing sync is visible instead of silent.
+  lastSyncAttemptAt     DateTime?
+  lastSyncError         String?
   status                String            @default("ACTIVE") // ACTIVE | DISCONNECTED
   disconnectedAt        DateTime?
   createdAt             DateTime          @default(now())
@@ -166,12 +170,17 @@ model Application {
   role           String
   source         ApplicationSource
   appliedAt      DateTime?
+  /// True when appliedAt is the date of the earliest email we saw rather than a
+  /// date the email stated (e.g. we only found the rejection, not the original
+  /// confirmation). Shown as "~Aug 4 (estimated)".
+  appliedAtEstimated Boolean       @default(false)
   currentStatus  ApplicationStatus @default(APPLIED)
   nextAction     String?
   nextActionDate DateTime?
   confidence     Float             @default(1.0)
   reviewState    ReviewState       @default(NONE)
   notes          String?
+  jobUrl         String?
   // Deterministic-matching fingerprint signals, kept for the resolver.
   senderDomain   String?
   atsIdentifier  String?

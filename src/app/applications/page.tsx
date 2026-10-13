@@ -6,7 +6,7 @@ import { ApplicationList } from "@/components/dashboard/ApplicationList";
 import { SearchBar } from "@/components/forms/SearchBar";
 import { FilterBar } from "@/components/forms/FilterBar";
 import { AddApplicationButton } from "@/components/forms/AddApplicationButton";
-import { buildApplicationWhere } from "@/lib/applicationsQuery";
+import { buildApplicationWhere, buildApplicationOrderBy } from "@/lib/applicationsQuery";
 import type { ApplicationSource, ApplicationStatus } from "@/generated/prisma";
 
 export default async function ApplicationsPage({
@@ -31,7 +31,8 @@ export default async function ApplicationsPage({
 
   const applications = await prisma.application.findMany({
     where,
-    orderBy: { updatedAt: "desc" },
+    orderBy: buildApplicationOrderBy(params.sort),
+    include: { events: { orderBy: { timestamp: "desc" }, take: 1, select: { timestamp: true } } },
   });
 
   return (
@@ -42,7 +43,7 @@ export default async function ApplicationsPage({
           <AddApplicationButton />
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
           <SearchBar />
           <FilterBar />
         </div>

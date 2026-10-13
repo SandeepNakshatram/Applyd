@@ -32,10 +32,10 @@ const SUBJECT_KEYWORDS = [
  * since passed), and it keeps each scan bounded regardless of inbox age. */
 const HISTORICAL_LOOKBACK_DAYS = 60;
 
-function buildSearchQuery(): string {
+function buildSearchQuery(sinceDate?: Date): string {
   const domainClause = JOB_SENDER_DOMAINS.map((d) => `from:${d}`).join(" OR ");
   const subjectClause = SUBJECT_KEYWORDS.map((k) => `subject:"${k}"`).join(" OR ");
-  const since = new Date(Date.now() - HISTORICAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const since = sinceDate ?? new Date(Date.now() - HISTORICAL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const afterClause = `after:${since.getUTCFullYear()}/${pad2(since.getUTCMonth() + 1)}/${pad2(since.getUTCDate())}`;
   return `((${domainClause}) OR (${subjectClause})) ${afterClause}`;
 }
@@ -104,8 +104,32 @@ export class GmailProvider implements EmailProvider {
     return this.fetchEmail(id);
   }
 
+  /** Re-lists recent relevant mail by date (no history cursor needed) and fetches it. */
+  private async listAndFetchSince(since: Date): Promise<RawEmail[]> {
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const list = await this.gmail.users.messages.list({
+        userId: "me",
+        q: buildSearchQuery(since),
+        maxResults: 100,
+        pageToken,
+      });
+      ids.push(...(list.data.messages ?? []).map((m) => m.id!).filter(Boolean));
+      pageToken = list.data.nextPageToken ?? undefined;
+    } while (pageToken && ids.length < MAX_HISTORICAL_MESSAGES);
+
+    const emails: RawEmail[] = [];
+    for (let i = 0; i < ids.length; i += 10) {
+      const batch = await Promise.all(ids.slice(i, i + 10).map((id) => this.fetchEmail(id)));
+      emails.push(...batch.filter((e): e is RawEmail => e !== null));
+    }
+    return emails;
+  }
+
   async syncIncremental(
-    sinceCursor: string
+    sinceCursor: string,
+    sinceDate?: Date
   ): Promise<{ emails: RawEmail[]; cursor: string }> {
     if (!sinceCursor) {
       const profile = await this.gmail.users.getProfile({ userId: "me" });
@@ -133,10 +157,15 @@ export class GmailProvider implements EmailProvider {
         pageToken = history.data.nextPageToken ?? undefined;
       } while (pageToken);
     } catch {
-      // A 404 here means the historyId is too old / has expired. Fall back to
-      // treating this as a fresh incremental baseline rather than failing sync.
+      // Gmail only keeps history for roughly a week; a 404 means the cursor has
+      // expired. Returning "nothing new" here (as this once did) silently drops
+      // every email that arrived during the gap while still advancing the
+      // cursor. Instead re-list mail since the last successful sync (a day of
+      // overlap — already-processed messages are deduplicated downstream).
       const profile = await this.gmail.users.getProfile({ userId: "me" });
-      return { emails: [], cursor: String(profile.data.historyId ?? sinceCursor) };
+      const from = new Date((sinceDate ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).getTime() - 24 * 60 * 60 * 1000);
+      const emails = await this.listAndFetchSince(from);
+      return { emails, cursor: String(profile.data.historyId ?? sinceCursor) };
     }
 
     const emails: RawEmail[] = [];

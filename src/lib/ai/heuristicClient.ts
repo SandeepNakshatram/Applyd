@@ -64,6 +64,17 @@ const KEYWORD_RULES: KeywordRule[] = [
     patterns: [/screening stage/i, /moved to the next stage/i, /reviewing your profile/i, /under review/i],
   },
   {
+    // Reminders about an application that already exists — not a new application.
+    eventType: "APPLICATION_STATUS_UPDATE",
+    confidence: 0.85,
+    patterns: [
+      /incomplete application/i,
+      /application is incomplete/i,
+      /complete your application/i,
+      /finish your application/i,
+    ],
+  },
+  {
     eventType: "APPLICATION_CONFIRMATION",
     confidence: 0.9,
     patterns: [
@@ -227,8 +238,13 @@ export const heuristicClient: AIClient = {
     const source = detectSource(email);
     const status = EVENT_TYPE_TO_STATUS[classification.eventType] ?? null;
     const overallConfidence = Math.min(classification.confidence, extracted.confidence);
+    const asksToComplete =
+      classification.eventType === "APPLICATION_STATUS_UPDATE" &&
+      /complete|finish|incomplete/i.test(`${email.subject} ${email.body}`);
 
     return {
+      nextAction: asksToComplete ? "Complete your application" : null,
+      eventDate: null,
       company: extracted.company,
       role: extracted.role,
       applicationDate: extracted.applicationDate,

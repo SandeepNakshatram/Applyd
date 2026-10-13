@@ -33,6 +33,7 @@ export async function createManualApplication(userId: string, input: ManualAppli
       nextAction: input.nextAction ?? null,
       nextActionDate: input.nextActionDate ? new Date(input.nextActionDate) : null,
       notes: input.notes ?? null,
+      jobUrl: input.jobUrl ?? null,
       confidence: 1,
       reviewState: "NONE",
       isManual: true,

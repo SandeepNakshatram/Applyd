@@ -48,10 +48,27 @@ describe("implausible extractions are rejected, from any engine", () => {
   });
 
   it("keeps abbreviations and punctuation that are legitimately part of a name", () => {
-    const out = postProcessExtraction(email, { ...base, company: "Acme Inc.", role: "Sr. Node.js Developer (.NET)" });
+    const acme = {
+      ...email,
+      from: "careers@acme.example",
+      fromDomain: "acme.example",
+      subject: "Application received",
+      body: "Thanks for applying to Acme Inc. for the Sr. Node.js Developer (.NET) role. We have received your application.",
+    };
+    const out = postProcessExtraction(acme, { ...base, company: "Acme Inc.", role: "Sr. Node.js Developer (.NET)" });
     expect(out.company).toBe("Acme Inc.");
     expect(out.role).toBe("Sr. Node.js Developer (.NET)");
     expect(out.confidence).toBe(0.9);
+  });
+
+  it("drops a company the email never mentions rather than trusting the model", () => {
+    const out = postProcessExtraction(email, { ...base, company: "Acme Inc.", role: "Technology Analyst" });
+    expect(out.company).not.toBe("Acme Inc.");
+  });
+
+  it("caps confidence when the role isn't in the email", () => {
+    const out = postProcessExtraction(email, { ...base, company: "Infosys", role: "Chief Galactic Warlord" });
+    expect(out.confidence).toBeLessThanOrEqual(0.6);
   });
 
   it("flags a company it had to guess, and won't trust it without corroboration", () => {

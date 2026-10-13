@@ -39,6 +39,8 @@ interface CombinedResult {
   applicationDate: unknown;
   status: unknown;
   atsIdentifier: unknown;
+  nextAction: unknown;
+  eventDate: unknown;
   extractionConfidence: unknown;
 }
 
@@ -90,6 +92,8 @@ export class GeminiClient implements AIClient {
               applicationDate: { type: SchemaType.STRING, nullable: true },
               status: { type: SchemaType.STRING, format: "enum", enum: [...STATUSES], nullable: true },
               atsIdentifier: { type: SchemaType.STRING, nullable: true },
+              nextAction: { type: SchemaType.STRING, nullable: true },
+              eventDate: { type: SchemaType.STRING, nullable: true },
               extractionConfidence: { type: SchemaType.NUMBER },
             },
             required: ["eventType", "classificationConfidence", "extractionConfidence"],
@@ -120,6 +124,8 @@ export class GeminiClient implements AIClient {
         eventType,
         confidence: clamp01(parsed.extractionConfidence),
         atsIdentifier: nullableString(parsed.atsIdentifier),
+        nextAction: nullableString(parsed.nextAction),
+        eventDate: validIsoDate(parsed.eventDate),
       });
 
       return {
@@ -169,7 +175,7 @@ function buildCombinedPrompt(email: RawEmail): string {
 
 ## Classification (eventType) — pick exactly one
 - APPLICATION_CONFIRMATION: the recipient applied for a JOB (employment) and this confirms it was received/submitted, or asks them to complete/finish that application.
-- APPLICATION_STATUS_UPDATE: a generic status change on a job application the recipient already made.
+- APPLICATION_STATUS_UPDATE: a reminder, request or generic status change about a job application that ALREADY exists — "your application is incomplete / please complete your application", "action required", requests for documents or details, "your application is under consideration". These are NOT new applications.
 - SCREENING: profile shortlisted / under review / recruiter screening call.
 - ASSESSMENT: a test, coding challenge, or assignment to complete.
 - INTERVIEW: an interview is being invited, scheduled or confirmed.
@@ -185,6 +191,8 @@ function buildCombinedPrompt(email: RawEmail): string {
 - applicationDate: ISO YYYY-MM-DD of when the person applied, only if stated; otherwise null.
 - status: APPLIED (applied, or asked to complete the application), SCREENING, ASSESSMENT, INTERVIEW, OFFER, REJECTED, WITHDRAWN. Match it to the stage this email is about.
 - atsIdentifier: any Candidate ID / Application ID / Job ID / Requisition ID / reference number.
+- nextAction: what the email asks the recipient to do next, in 2-6 words ("Complete your application", "Attend interview", "Complete assessment", "Respond to offer"). null if nothing is asked.
+- eventDate: ISO YYYY-MM-DD of when that next step happens or is due (interview date, assessment deadline, offer expiry), only if the email states it; otherwise null.
 - For JOB_ALERT and IRRELEVANT, return null for all extraction fields.
 
 ## Examples
@@ -192,6 +200,7 @@ function buildCombinedPrompt(email: RawEmail): string {
   => APPLICATION_CONFIRMATION, company "Infosys", role "Technology Analyst", status APPLIED.
 - "Interview Invite: Alex | Candidate ID: 1004334000 ... We have scheduled an interview for you" from talent-acquisition@infosys.com
   => INTERVIEW, company "Infosys", role null, status INTERVIEW, atsIdentifier "1004334000".
+- "Regarding your application — your application is incomplete, please log in to complete it" => APPLICATION_STATUS_UPDATE, status APPLIED, nextAction "Complete your application".
 - "Congratulations on completing the Admissions Test! Your application has been submitted" from a business school => IRRELEVANT (admissions, not a job).
 - "You're invited to apply for the Java Developer role at Acme — This role is a great match! [Apply Now]" from a job board => JOB_ALERT.
 
@@ -211,6 +220,8 @@ Respond with JSON only: {
   "applicationDate": string or null,
   "status": string or null,
   "atsIdentifier": string or null,
+  "nextAction": string or null,
+  "eventDate": string or null,
   "extractionConfidence": number between 0 and 1
 }`;
 }
@@ -219,6 +230,12 @@ function clamp01(n: unknown): number {
   const num = typeof n === "number" ? n : Number(n);
   if (Number.isNaN(num)) return 0.5;
   return Math.min(1, Math.max(0, num));
+}
+
+function validIsoDate(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) && !Number.isNaN(new Date(t).getTime()) ? t : null;
 }
 
 function nullableString(v: unknown): string | null {

@@ -206,22 +206,60 @@ export async function processIncrementalSync(params: {
   connectedAccountId: string;
   provider: EmailProvider;
   sinceCursor: string;
+  /** When the last successful sync finished — used to re-list mail if Gmail's history cursor has expired. */
+  sinceDate?: Date | null;
 }): Promise<{ newEmails: number; notificationsCreated: number }> {
-  const { userId, connectedAccountId, provider, sinceCursor } = params;
+  const { userId, connectedAccountId, provider, sinceCursor, sinceDate } = params;
   const aiClient = getAIClient();
-
-  const { emails, cursor } = await provider.syncIncremental(sinceCursor);
-
-  let notificationsCreated = 0;
-  for (const email of emails) {
-    const result = await ingestEmail({ userId, connectedAccountId, email, aiClient });
-    if (result.notificationId) notificationsCreated += 1;
-  }
 
   await prisma.connectedAccount.update({
     where: { id: connectedAccountId },
-    data: { historyId: cursor, lastSyncedAt: new Date() },
+    data: { lastSyncAttemptAt: new Date() },
   });
 
-  return { newEmails: emails.length, notificationsCreated };
+  try {
+    const { emails, cursor } = await provider.syncIncremental(sinceCursor, sinceDate ?? undefined);
+
+    let notificationsCreated = 0;
+    let failures = 0;
+    for (const email of emails) {
+      try {
+        const result = await ingestEmail({ userId, connectedAccountId, email, aiClient });
+        if (result.notificationId) notificationsCreated += 1;
+      } catch (err) {
+        // One bad email must not block the rest, but we also must not advance
+        // the cursor past it — the next run retries (ingest is idempotent).
+        failures += 1;
+        console.error("[sync] ingest failed for one email:", err instanceof Error ? err.message : err);
+      }
+    }
+
+    if (failures > 0) {
+      await prisma.connectedAccount.update({
+        where: { id: connectedAccountId },
+        data: { lastSyncError: `${failures} email(s) could not be processed; will retry.` },
+      });
+    } else {
+      await prisma.connectedAccount.update({
+        where: { id: connectedAccountId },
+        data: { historyId: cursor, lastSyncedAt: new Date(), lastSyncError: null },
+      });
+    }
+
+    return { newEmails: emails.length, notificationsCreated };
+  } catch (err) {
+    await prisma.connectedAccount.update({
+      where: { id: connectedAccountId },
+      data: { lastSyncError: describeSyncError(err) },
+    });
+    throw err;
+  }
+}
+
+function describeSyncError(err: unknown): string {
+  const message = err instanceof Error ? err.message : "Sync failed";
+  if (/invalid_grant|invalid_token|unauthorized|401/i.test(message)) {
+    return "Gmail access expired or was revoked — reconnect your account in Settings.";
+  }
+  return message.slice(0, 200);
 }

@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { format } from "date-fns";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import type { Application, ApplicationEvent } from "@/generated/prisma";
+import { STATUS_LABELS } from "@/lib/labels";
+import { daysSinceActivity, isStale } from "@/lib/followUps";
 import { StatusBadge } from "./StatusBadge";
 import { SourceBadge } from "./SourceBadge";
 import { ApplicationTimeline } from "./ApplicationTimeline";
@@ -44,15 +48,28 @@ export function ApplicationDetail({
       nextAction: form.get("nextAction") || null,
       nextActionDate: form.get("nextActionDate") || null,
       notes: form.get("notes") || null,
+      jobUrl: String(form.get("jobUrl") ?? "").trim() || null,
     });
     setEditing(false);
   }
 
+  const lastEventAt = events.length ? events[events.length - 1].timestamp : null;
+  const stale = isStale({ ...application, lastEventAt });
+  const quietDays = daysSinceActivity({ ...application, lastEventAt });
+
   return (
     <div className="flex flex-col gap-6">
+      <Link
+        href="/applications"
+        className="inline-flex w-fit items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-900"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        All applications
+      </Link>
+
       <div className="rounded-xl border border-slate-200 bg-white p-6">
-        <div className="flex items-start justify-between">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-xl font-bold text-slate-900">{displayRole(application.role)}</h1>
             <p className="text-sm text-slate-500">{displayCompany(application.company)}</p>
           </div>
@@ -62,10 +79,17 @@ export function ApplicationDetail({
           </div>
         </div>
 
+        {stale && (
+          <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            No update in {quietDays} days — consider following up with the company.
+          </div>
+        )}
+
         {application.reviewState === "PENDING" && (
           <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            This application was detected with {Math.round(application.confidence * 100)}% confidence
-            and needs your review.
+            {application.confidence < 0.75
+              ? `This application was detected with low confidence (${Math.round(application.confidence * 100)}%) and needs your review.`
+              : "Some details of this application couldn't be read from the email — please check them."}
             <div className="mt-2 flex gap-2">
               <button
                 onClick={() => patch({ reviewAction: "confirm" })}
@@ -90,7 +114,16 @@ export function ApplicationDetail({
         )}
 
         <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-          <Field label="Applied date" value={application.appliedAt ? format(new Date(application.appliedAt), "MMM d, yyyy") : "—"} />
+          <Field
+            label="Applied date"
+            value={
+              application.appliedAt
+                ? application.appliedAtEstimated
+                  ? `~${format(new Date(application.appliedAt), "MMM d, yyyy")} (estimated)`
+                  : format(new Date(application.appliedAt), "MMM d, yyyy")
+                : "—"
+            }
+          />
           <Field label="Next action" value={application.nextAction ?? "—"} />
           <Field
             label="Next action date"
@@ -98,6 +131,18 @@ export function ApplicationDetail({
           />
           <Field label="Detected from email" value={events.some((e) => e.emailId) ? "Yes" : "No — added manually"} />
         </dl>
+
+        {application.jobUrl && (
+          <a
+            href={application.jobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            View job posting
+          </a>
+        )}
 
         {application.notes && (
           <p className="mt-4 whitespace-pre-wrap rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
@@ -145,7 +190,7 @@ export function ApplicationDetail({
                 <select name="status" defaultValue={application.currentStatus} className="input">
                   {applicationStatusValues.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {STATUS_LABELS[s]}
                     </option>
                   ))}
                 </select>
@@ -163,6 +208,16 @@ export function ApplicationDetail({
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Next action</label>
               <input name="nextAction" defaultValue={application.nextAction ?? ""} className="input" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Job posting link</label>
+              <input
+                name="jobUrl"
+                type="url"
+                defaultValue={application.jobUrl ?? ""}
+                placeholder="https://…"
+                className="input"
+              />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Notes</label>

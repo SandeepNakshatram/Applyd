@@ -5,17 +5,19 @@ export function SummaryCards({
   active,
   interviews,
   followUpsDue,
+  needsReview,
 }: {
   total: number;
   active: number;
   interviews: number;
   followUpsDue: number;
+  needsReview: number;
 }) {
   const cards = [
-    { label: "Total applications", value: total },
-    { label: "Active applications", value: active },
-    { label: "Interviews", value: interviews },
-    { label: "Follow-ups due", value: followUpsDue },
+    { label: "Total applications", value: total, hint: needsReview > 0 ? `+${needsReview} awaiting review` : null },
+    { label: "Active applications", value: active, hint: null },
+    { label: "Interviews", value: interviews, hint: null },
+    { label: "Follow-ups due", value: followUpsDue, hint: "Next step due or no update in 30 days" },
   ];
 
   return (
@@ -24,6 +26,7 @@ export function SummaryCards({
         <div key={c.label} className={CARD_STYLES}>
           <p className="text-xs font-medium text-slate-500">{c.label}</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">{c.value}</p>
+          {c.hint && <p className="mt-0.5 text-xs text-slate-400">{c.hint}</p>}
         </div>
       ))}
     </div>

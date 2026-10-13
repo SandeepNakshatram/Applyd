@@ -15,8 +15,11 @@ export function ApplicationCard({
   application,
   sourceEmailId,
   reason,
+  emailSubject,
 }: {
   application: Application;
+  /** Subject of the email that produced this record, so it can be judged without opening Gmail. */
+  emailSubject?: string | null;
   /** The Gmail message ID that produced this application/event, if any (manual entries have none). */
   sourceEmailId: string | null;
   /** Plain-language reason this needs a human look. */
@@ -59,12 +62,20 @@ export function ApplicationCard({
             <StatusBadge status={application.currentStatus} />
           </div>
         </div>
-        <span className="whitespace-nowrap text-xs font-medium text-slate-500">
-          Confidence: {Math.round(application.confidence * 100)}%
-        </span>
+        {/* A high score on an item that still needs review is misleading, so only show low ones. */}
+        {application.confidence < 0.75 && (
+          <span className="whitespace-nowrap text-xs font-medium text-amber-700">
+            Low confidence: {Math.round(application.confidence * 100)}%
+          </span>
+        )}
       </div>
 
       <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{reason}</p>
+      {emailSubject && (
+        <p className="mt-2 truncate text-xs text-slate-500" title={emailSubject}>
+          Email: {emailSubject}
+        </p>
+      )}
 
       {editing && (
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">

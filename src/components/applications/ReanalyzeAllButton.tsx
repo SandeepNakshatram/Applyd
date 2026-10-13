@@ -47,11 +47,11 @@ export function ReanalyzeAllButton({ applicationIds }: { applicationIds: string[
   if (applicationIds.length === 0) return null;
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex shrink-0 flex-col items-end gap-1">
       <button
         onClick={run}
         disabled={progress !== null}
-        className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+        className="flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
       >
         <RefreshCw className={`h-4 w-4 ${progress ? "animate-spin" : ""}`} />
         {progress ? `Re-analyzing ${progress.done + 1}/${progress.total}…` : "Re-analyze all"}

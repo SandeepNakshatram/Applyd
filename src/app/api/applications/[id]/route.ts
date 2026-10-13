@@ -46,13 +46,17 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { reviewAction, appliedAt, nextActionDate, ...rest } = parsed.data;
+  const { reviewAction, appliedAt, nextActionDate, status, ...rest } = parsed.data;
 
   const application = await prisma.application.update({
     where: { id },
     data: {
       ...rest,
-      ...(appliedAt !== undefined ? { appliedAt: appliedAt ? new Date(appliedAt) : null } : {}),
+      ...(status ? { currentStatus: status } : {}),
+      // A date the user typed is no longer an estimate.
+      ...(appliedAt !== undefined
+        ? { appliedAt: appliedAt ? new Date(appliedAt) : null, appliedAtEstimated: false }
+        : {}),
       ...(nextActionDate !== undefined
         ? { nextActionDate: nextActionDate ? new Date(nextActionDate) : null }
         : {}),

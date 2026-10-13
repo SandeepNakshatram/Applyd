@@ -1,6 +1,7 @@
 import type { EmailEventType } from "@/generated/prisma";
 import type { ExtractionResult, RawEmail } from "@/types/pipeline";
 import { ATS_DOMAINS, JOB_BOARD_DOMAINS, MAIL_PROVIDER_DOMAINS, domainMatches } from "@/lib/jobDomains";
+import { companyKey } from "@/lib/companyKey";
 
 /**
  * Last-line defences applied to every extraction regardless of which engine
@@ -27,6 +28,50 @@ function credible(value: string | null, maxChars: number, maxWords: number): str
   if (v.split(/\s+/).length > maxWords) return null;
   if (looksLikeSentence(v)) return null;
   return v;
+}
+
+const COMPANY_STOPWORDS = new Set([
+  "us", "we", "our", "you", "your", "team", "company", "the company", "hr", "recruiter", "candidate",
+  "applicant", "sir", "madam", "hiring team", "talent acquisition", "careers", "jobs", "n/a", "na",
+  "none", "unknown", "not specified",
+]);
+
+/**
+ * A company name is a proper noun. Common-word fragments ("the earliest",
+ * lifted from "...at the earliest") and generic nouns aren't one.
+ */
+function plausibleCompany(value: string): boolean {
+  const words = value.trim().split(/\s+/);
+  if (COMPANY_STOPWORDS.has(value.trim().toLowerCase())) return false;
+  // Several words and not one capital letter among them: a phrase, not a name.
+  if (words.length > 1 && words.every((w) => w === w.toLowerCase())) return false;
+  return true;
+}
+
+/** "the role of Technology Analyst" -> "Technology Analyst". */
+function cleanRoleText(role: string | null): string | null {
+  if (!role) return role;
+  return role.replace(/^(?:the\s+)?(?:role|position|post|job)\s+of\s+/i, "").trim() || null;
+}
+
+const fold = (s: string) =>
+  s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/**
+ * Is this value actually in the email? A model can produce a fluent,
+ * confident, plausible-looking company or role that appears nowhere in the
+ * message; checking the text (accent/case/punctuation-insensitive) is the
+ * cheapest reliable hallucination guard there is.
+ */
+function groundedIn(value: string, haystack: string, minWordCoverage = 1): boolean {
+  const needle = fold(value);
+  if (!needle) return false;
+  const hay = ` ${fold(haystack)} `;
+  if (hay.includes(` ${needle} `)) return true;
+  if (minWordCoverage >= 1) return false;
+  const words = needle.split(" ");
+  const present = words.filter((w) => hay.includes(` ${w} `)).length;
+  return present / words.length >= minWordCoverage;
 }
 
 /** Domains that say nothing about the employer (job boards, ATS vendors, mail providers). */
@@ -78,14 +123,27 @@ export function postProcessExtraction(email: RawEmail, extraction: ExtractionRes
   let { company, role, confidence } = extraction;
   let companyInferred = false;
 
-  const cleanCompany = credible(company, MAX_COMPANY_CHARS, MAX_COMPANY_WORDS);
-  const cleanRole = credible(role, MAX_ROLE_CHARS, MAX_ROLE_WORDS);
-  const discarded = cleanCompany !== company || cleanRole !== role;
+  const rawRole = cleanRoleText(role);
+  let cleanCompany = credible(company, MAX_COMPANY_CHARS, MAX_COMPANY_WORDS);
+  if (cleanCompany && !plausibleCompany(cleanCompany)) cleanCompany = null;
+  const cleanRole = credible(rawRole, MAX_ROLE_CHARS, MAX_ROLE_WORDS);
+
+  const emailText = `${email.subject} ${email.body} ${email.from} ${email.fromDomain.replace(/\./g, " ")}`;
+  // The company must be findable in the email (ignoring a trailing "Limited"/"Inc"
+  // either way); one that isn't was made up, so it's dropped, not just doubted.
+  if (cleanCompany && !groundedIn(companyKey(cleanCompany), emailText)) cleanCompany = null;
+
+  const discarded = cleanCompany !== company || (cleanRole !== rawRole);
   if (discarded) {
     // A value was thrown away as implausible — the rest of the extraction
     // deserves less trust too.
     confidence = Math.min(confidence, 0.5);
   }
+  // A role we can't find in the email is kept (the user can check it) but flagged.
+  if (cleanRole && !groundedIn(cleanRole, emailText, 0.8)) confidence = Math.min(confidence, 0.6);
+  // Model self-ratings cluster at 1.0 and say little; never present "certain".
+  confidence = Math.min(confidence, 0.95);
+
   company = cleanCompany;
   role = cleanRole;
 

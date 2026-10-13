@@ -7,6 +7,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ReanalyzeAllButton } from "@/components/applications/ReanalyzeAllButton";
 import { reviewReason } from "@/lib/reviewReason";
 
+function subjectOf(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const email = (data as { email?: { subject?: unknown } }).email;
+  return typeof email?.subject === "string" ? email.subject : null;
+}
+
 export default async function ReviewPage() {
   const session = await auth();
   if (!session?.user) redirect("/");
@@ -20,7 +26,7 @@ export default async function ReviewPage() {
   return (
     <AppShell userName={session.user.name} userImage={session.user.image}>
       <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Review Queue</h1>
             <p className="text-sm text-slate-500">
@@ -46,6 +52,7 @@ export default async function ReviewPage() {
                 application={app}
                 sourceEmailId={app.events[0]?.emailId ?? null}
                 reason={reviewReason(app, app.events[0]?.extractedData)}
+                emailSubject={subjectOf(app.events[0]?.extractedData)}
               />
             ))}
           </div>

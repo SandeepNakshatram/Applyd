@@ -34,12 +34,20 @@ export async function createNotification(params: {
 
 export async function notifyNewApplication(
   userId: string,
-  application: Application
+  application: Application,
+  eventType?: EmailEventType
 ): Promise<Notification> {
+  // When the first mail we find about an application is already a later stage
+  // (an interview invite, a rejection...), say that — "New application found"
+  // would bury the part that matters.
+  const staged =
+    eventType && eventType !== "APPLICATION_CONFIRMATION" && eventType !== "APPLICATION_STATUS_UPDATE"
+      ? EVENT_TITLES[eventType]
+      : undefined;
   return createNotification({
     userId,
     type: "NEW_APPLICATION",
-    title: "New application found",
+    title: staged ?? "New application found",
     message: describeApplication(application.company, application.role),
     applicationId: application.id,
   });
@@ -74,13 +82,15 @@ export async function notifyReviewNeeded(
 
 export async function notifyFollowUpDue(
   userId: string,
-  application: Application
+  application: Application,
+  reason?: string
 ): Promise<Notification> {
+  const subject = describeApplication(application.company, application.role);
   return createNotification({
     userId,
     type: "FOLLOW_UP_DUE",
     title: "Follow-up due",
-    message: describeApplication(application.company, application.role),
+    message: reason ? `${subject} — ${reason.charAt(0).toLowerCase()}${reason.slice(1)}` : subject,
     applicationId: application.id,
   });
 }

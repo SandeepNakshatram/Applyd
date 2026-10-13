@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/layout/AppShell";
@@ -7,9 +8,14 @@ import { ApplicationList } from "@/components/dashboard/ApplicationList";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { ReviewQueueBanner } from "@/components/dashboard/ReviewQueue";
 import { AddApplicationButton } from "@/components/forms/AddApplicationButton";
-import Link from "next/link";
+import { SyncStatus } from "@/components/dashboard/SyncStatus";
+import { isFollowUpDue } from "@/lib/followUps";
+import type { ReviewState } from "@/generated/prisma";
 
-const ACTIVE_STATUSES = ["APPLIED", "SCREENING", "ASSESSMENT", "INTERVIEW", "OFFER"] as const;
+// Stats only count records the user can see in the list (confirmed or
+// auto-accepted) — pending ones are reported separately as "needs review".
+const COUNTED: { in: ReviewState[] } = { in: ["NONE", "CONFIRMED"] };
+const OPEN_STATUSES = ["APPLIED", "SCREENING", "ASSESSMENT", "INTERVIEW", "OFFER"] as const;
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -17,52 +23,58 @@ export default async function DashboardPage() {
 
   const userId = session.user.id;
 
-  const [total, active, interviews, followUpsDue, applications, pendingReview, notifications] =
-    await Promise.all([
-      prisma.application.count({ where: { userId, reviewState: { not: "IGNORED" } } }),
-      prisma.application.count({
-        where: { userId, reviewState: { not: "IGNORED" }, currentStatus: { in: [...ACTIVE_STATUSES] } },
-      }),
-      prisma.application.count({
-        where: { userId, reviewState: { not: "IGNORED" }, currentStatus: "INTERVIEW" },
-      }),
-      prisma.application.count({
-        where: {
-          userId,
-          reviewState: { not: "IGNORED" },
-          nextActionDate: { lte: new Date() },
-        },
-      }),
-      prisma.application.findMany({
-        where: { userId, reviewState: { in: ["NONE", "CONFIRMED"] } },
-        orderBy: { updatedAt: "desc" },
-        take: 20,
-      }),
-      prisma.application.findMany({
-        where: { userId, reviewState: "PENDING" },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.notification.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 6,
-      }),
-    ]);
+  const [counted, pendingReview, notifications, account] = await Promise.all([
+    prisma.application.findMany({
+      where: { userId, reviewState: COUNTED },
+      orderBy: { updatedAt: "desc" },
+      include: { events: { orderBy: { timestamp: "desc" }, take: 1, select: { timestamp: true } } },
+    }),
+    prisma.application.findMany({
+      where: { userId, reviewState: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+    }),
+    prisma.connectedAccount.findFirst({
+      where: { userId, status: "ACTIVE" },
+      select: { lastSyncedAt: true, lastSyncError: true },
+    }),
+  ]);
+
+  const now = new Date();
+  const total = counted.length;
+  const active = counted.filter((a) => (OPEN_STATUSES as readonly string[]).includes(a.currentStatus)).length;
+  const interviews = counted.filter((a) => a.currentStatus === "INTERVIEW").length;
+  const followUpsDue = counted.filter((a) =>
+    isFollowUpDue({ ...a, lastEventAt: a.events[0]?.timestamp ?? null }, now)
+  ).length;
 
   return (
     <AppShell userName={session.user.name} userImage={session.user.image}>
       <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
             <p className="text-sm text-slate-500">
               Automatically discovered applications, kept up to date for you.
             </p>
+            {account && (
+              <SyncStatus lastSyncedAt={account.lastSyncedAt} lastSyncError={account.lastSyncError} />
+            )}
           </div>
           <AddApplicationButton />
         </div>
 
-        <SummaryCards total={total} active={active} interviews={interviews} followUpsDue={followUpsDue} />
+        <SummaryCards
+          total={total}
+          active={active}
+          interviews={interviews}
+          followUpsDue={followUpsDue}
+          needsReview={pendingReview.length}
+        />
 
         <ReviewQueueBanner applications={pendingReview} />
 
@@ -74,7 +86,7 @@ export default async function DashboardPage() {
                 View all
               </Link>
             </div>
-            <ApplicationList applications={applications} />
+            <ApplicationList applications={counted.slice(0, 20)} />
           </div>
           <RecentActivity notifications={notifications} />
         </div>

@@ -25,7 +25,30 @@ interface NextAction {
   nextActionDate: Date | null;
 }
 
-function deriveNextAction(eventType: EmailEventType, from: Date): NextAction {
+/** What the email itself said to do next/when wins; otherwise a sensible default for the stage. */
+function deriveNextAction(extraction: ExtractionResult, from: Date): NextAction {
+  const fallback = defaultNextAction(extraction.eventType, from);
+  const stated = extraction.nextAction?.trim();
+  const date = extraction.eventDate ? new Date(extraction.eventDate) : null;
+  return {
+    nextAction: stated ? stated.slice(0, 120) : fallback.nextAction,
+    nextActionDate: date && !Number.isNaN(date.getTime()) ? date : fallback.nextActionDate,
+  };
+}
+
+/** Sender/subject/snippet kept on the event so the timeline can show what each step was detected from. */
+function eventData(email: RawEmail, extraction: ExtractionResult): Prisma.InputJsonValue {
+  return {
+    ...extraction,
+    email: {
+      from: email.from,
+      subject: email.subject.slice(0, 200),
+      snippet: email.snippet.slice(0, 160),
+    },
+  } as unknown as Prisma.InputJsonValue;
+}
+
+function defaultNextAction(eventType: EmailEventType, from: Date): NextAction {
   switch (eventType) {
     case "APPLICATION_CONFIRMATION":
       return { nextAction: "Awaiting response", nextActionDate: null };
@@ -154,6 +177,16 @@ export async function resolveApplication(params: {
       return { outcome: "IGNORED_ALREADY_PROCESSED", applicationId: existing.id };
     }
 
+    // Mail isn't processed in chronological order (a scan lists newest first),
+    // so an OLDER email arriving after a newer one must not drag the status,
+    // next action or notifications backwards — it only fills in history.
+    const latest = await prisma.applicationEvent.findFirst({
+      where: { applicationId: existing.id },
+      orderBy: { timestamp: "desc" },
+      select: { timestamp: true },
+    });
+    const isNewest = !latest || email.receivedAt.getTime() >= latest.timestamp.getTime();
+
     const event = await prisma.applicationEvent.create({
       data: {
         applicationId: existing.id,
@@ -162,21 +195,45 @@ export async function resolveApplication(params: {
         timestamp: email.receivedAt,
         source,
         emailId: email.providerMessageId,
-        extractedData: extraction as unknown as Prisma.InputJsonValue,
+        extractedData: eventData(email, extraction),
         confidence: extraction.confidence,
       },
     });
 
-    const nextAction = deriveNextAction(extraction.eventType, email.receivedAt);
+    const nextAction = deriveNextAction(extraction, email.receivedAt);
     const enteringReview =
       existing.reviewState !== "PENDING" && extraction.confidence < REVIEW_CONFIDENCE_THRESHOLD;
+
+    // The applied date is the earliest evidence we have: a stated date from a
+    // confirmation is exact; otherwise the first email seen is an estimate.
+    const confirmedDate =
+      extraction.eventType === "APPLICATION_CONFIRMATION"
+        ? extraction.applicationDate
+          ? new Date(extraction.applicationDate)
+          : email.receivedAt
+        : null;
+    const appliedUpdate: { appliedAt?: Date; appliedAtEstimated?: boolean } = {};
+    if (confirmedDate) {
+      if (!existing.appliedAt || existing.appliedAtEstimated || confirmedDate < existing.appliedAt) {
+        appliedUpdate.appliedAt = confirmedDate;
+        appliedUpdate.appliedAtEstimated = false;
+      }
+    } else if (!existing.appliedAt || (existing.appliedAtEstimated && email.receivedAt < existing.appliedAt)) {
+      appliedUpdate.appliedAt = email.receivedAt;
+      appliedUpdate.appliedAtEstimated = true;
+    }
 
     const updated = await prisma.application.update({
       where: { id: existing.id },
       data: {
-        currentStatus: extraction.status ?? existing.currentStatus,
-        nextAction: nextAction.nextAction,
-        nextActionDate: nextAction.nextActionDate,
+        ...appliedUpdate,
+        ...(isNewest
+          ? {
+              currentStatus: extraction.status ?? existing.currentStatus,
+              nextAction: nextAction.nextAction,
+              nextActionDate: nextAction.nextActionDate,
+            }
+          : {}),
         // Learn from later mail: fill placeholders and the missing id, never overwrite real values.
         ...(extraction.company && existing.company === UNKNOWN_COMPANY ? { company: extraction.company } : {}),
         ...(extraction.role && existing.role === UNKNOWN_ROLE ? { role: extraction.role } : {}),
@@ -187,14 +244,18 @@ export async function resolveApplication(params: {
       },
     });
 
-    const notificationId = await send(() =>
-      enteringReview
-        ? notifyReviewNeeded(userId, updated)
-        : notifyStatusChange(userId, updated, extraction.eventType)
-    );
+    // Telling the user "moved to Screening" about a step that's already behind
+    // them would be noise; only the newest development notifies.
+    const notificationId = isNewest
+      ? await send(() =>
+          enteringReview
+            ? notifyReviewNeeded(userId, updated)
+            : notifyStatusChange(userId, updated, extraction.eventType)
+        )
+      : undefined;
 
     return {
-      outcome: "EVENT_ADDED_WITH_NOTIFICATION",
+      outcome: isNewest ? "EVENT_ADDED_WITH_NOTIFICATION" : "EVENT_ADDED_NO_NOTIFICATION",
       applicationId: existing.id,
       eventId: event.id,
       notificationId,
@@ -211,7 +272,8 @@ export async function resolveApplication(params: {
     extraction.confidence < REVIEW_CONFIDENCE_THRESHOLD ||
     !extraction.company ||
     extraction.companyInferred === true;
-  const nextAction = deriveNextAction(extraction.eventType, email.receivedAt);
+  const nextAction = deriveNextAction(extraction, email.receivedAt);
+  const isConfirmation = extraction.eventType === "APPLICATION_CONFIRMATION";
 
   const application = await prisma.application.create({
     data: {
@@ -219,12 +281,10 @@ export async function resolveApplication(params: {
       company: extraction.company ?? UNKNOWN_COMPANY,
       role: extraction.role ?? UNKNOWN_ROLE,
       source,
-      appliedAt:
-        extraction.eventType === "APPLICATION_CONFIRMATION"
-          ? extraction.applicationDate
-            ? new Date(extraction.applicationDate)
-            : email.receivedAt
-          : null,
+      // No confirmation email seen (we only found, say, the rejection): use the
+      // earliest email's date and say it's an estimate rather than show nothing.
+      appliedAt: isConfirmation && extraction.applicationDate ? new Date(extraction.applicationDate) : email.receivedAt,
+      appliedAtEstimated: !isConfirmation,
       currentStatus: extraction.status ?? "APPLIED",
       confidence: extraction.confidence,
       reviewState: needsReview ? "PENDING" : "NONE",
@@ -243,13 +303,15 @@ export async function resolveApplication(params: {
       timestamp: email.receivedAt,
       source,
       emailId: email.providerMessageId,
-      extractedData: extraction as unknown as Prisma.InputJsonValue,
+      extractedData: eventData(email, extraction),
       confidence: extraction.confidence,
     },
   });
 
   const notificationId = await send(() =>
-    needsReview ? notifyReviewNeeded(userId, application) : notifyNewApplication(userId, application)
+    needsReview
+      ? notifyReviewNeeded(userId, application)
+      : notifyNewApplication(userId, application, extraction.eventType)
   );
 
   return {

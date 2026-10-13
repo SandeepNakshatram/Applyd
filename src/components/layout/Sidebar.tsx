@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function Sidebar() {
+export function Sidebar({ reviewCount = 0 }: { reviewCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -23,6 +23,7 @@ export function Sidebar() {
       <nav className="flex flex-col gap-1">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
+          const badge = href === "/review" && reviewCount > 0 ? reviewCount : null;
           return (
             <Link
               key={href}
@@ -35,7 +36,15 @@ export function Sidebar() {
               )}
             >
               <Icon className="h-4 w-4" />
-              {label}
+              <span className="flex-1">{label}</span>
+              {badge !== null && (
+                <span
+                  aria-label={`${badge} awaiting review`}
+                  className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white"
+                >
+                  {badge}
+                </span>
+              )}
             </Link>
           );
         })}

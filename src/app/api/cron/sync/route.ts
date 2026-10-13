@@ -1,13 +1,15 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getProviderForAccount } from "@/lib/email/getProviderForAccount";
-import { processIncrementalSync } from "@/lib/pipeline/scan";
+import { syncAccount, createFollowUpReminders } from "@/lib/pipeline/sync";
+
+export const maxDuration = 300;
 
 /**
  * Server-side incremental sync, meant to be invoked by a scheduler (Vercel
  * Cron / any external cron hitting this with the shared secret) — never by
- * client-side polling (spec section 20).
+ * client-side polling (spec section 20). Also raises follow-up reminders for
+ * applications that are due or have gone quiet.
  */
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -22,22 +24,16 @@ export async function GET(req: Request) {
 
   const results = [];
   for (const account of accounts) {
-    try {
-      const provider = await getProviderForAccount(account);
-      const result = await processIncrementalSync({
-        userId: account.userId,
-        connectedAccountId: account.id,
-        provider,
-        sinceCursor: account.historyId ?? "",
-      });
-      results.push({ connectedAccountId: account.id, ...result });
-    } catch (err) {
-      results.push({
-        connectedAccountId: account.id,
-        error: err instanceof Error ? err.message : "sync failed",
-      });
-    }
+    const outcome = await syncAccount(account, { force: true });
+    results.push({ connectedAccountId: account.id, ...outcome });
   }
 
-  return NextResponse.json({ syncedAccounts: results.length, results });
+  let followUpsCreated = 0;
+  try {
+    followUpsCreated = await createFollowUpReminders();
+  } catch (err) {
+    console.error("[cron] follow-up reminders failed:", err instanceof Error ? err.message : err);
+  }
+
+  return NextResponse.json({ syncedAccounts: results.length, followUpsCreated, results });
 }

@@ -1,8 +1,7 @@
-import type { Application } from "@/generated/prisma";
-import { ApplicationRow } from "@/components/applications/ApplicationRow";
+import { ApplicationRow, type ApplicationRowData } from "@/components/applications/ApplicationRow";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-export function ApplicationList({ applications }: { applications: Application[] }) {
+export function ApplicationList({ applications }: { applications: ApplicationRowData[] }) {
   if (applications.length === 0) {
     return (
       <EmptyState

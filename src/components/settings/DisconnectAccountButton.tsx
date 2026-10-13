@@ -28,7 +28,7 @@ export function DisconnectAccountButton() {
       <ConfirmDialog
         open={open}
         title="Disconnect Gmail?"
-        description="Applyd will stop scanning and syncing this inbox. Applications already found will stay in your dashboard."
+        description="Applyd will stop reading this inbox and delete the stored Gmail access. Applications and timelines already found are kept — use “Delete my account and data” to remove those too."
         confirmLabel={loading ? "Disconnecting…" : "Disconnect"}
         onConfirm={handleConfirm}
         onCancel={() => setOpen(false)}

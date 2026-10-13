@@ -11,6 +11,7 @@ export const ATS_DOMAINS = [
   "greenhouse-mail.io",
   "lever.co",
   "myworkdayjobs.com",
+  "myworkday.com",
   "workday.com",
   "smartrecruiters.com",
   "icims.com",

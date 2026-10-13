@@ -110,3 +110,10 @@ describe("company names that differ only in legal suffix, accents or punctuation
     expect(sameCompany("", "")).toBe(false);
   });
 });
+
+describe("Workday senders", () => {
+  it("treats myworkday.com (e.g. accenture@myworkday.com) as an ATS, not an employer and not 'Other'", () => {
+    expect(companyFromSenderDomain("myworkday.com")).toBeNull();
+    expect(detectSource({ ...mockEmails.greenhouseConfirmation, from: "accenture@myworkday.com", fromDomain: "myworkday.com" })).toBe("COMPANY_WEBSITE");
+  });
+});

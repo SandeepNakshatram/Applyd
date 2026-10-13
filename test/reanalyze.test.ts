@@ -27,8 +27,8 @@ const provider: EmailProvider = {
   async getCurrentCursor() {
     return "cursor";
   },
-  async syncIncremental() {
-    return { emails: [], cursor: "cursor" };
+  async listMessageIdsSince() {
+    return { messageIds: [] };
   },
 };
 

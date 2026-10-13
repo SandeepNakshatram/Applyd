@@ -197,19 +197,32 @@ export async function continueInitialScan(params: {
   }
 }
 
+const SYNC_LOOKBACK_DAYS = 60;
+/** Most new emails one sync run will download and analyse; the rest are picked up next run. */
+const MAX_NEW_EMAILS_PER_SYNC = 60;
+/** Concurrent Gmail downloads — low, because Gmail enforces per-minute quota units per user. */
+const FETCH_CONCURRENCY = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Incremental sync for an already-connected mailbox. Invoked server-side
- * only (cron route / Gmail push webhook) — never from client-side polling.
+ * only (cron route / app-open / "Check email now") — never from client-side
+ * polling.
+ *
+ * It lists the ids of relevant mail since the last successful sync (with a
+ * day of overlap), drops the ones already processed *before* downloading
+ * anything, and fetches just the rest. It deliberately doesn't use Gmail's
+ * history cursor: that expires after about a week, and re-downloading
+ * everything to compensate exhausted Gmail's per-minute quota.
  */
 export async function processIncrementalSync(params: {
   userId: string;
   connectedAccountId: string;
   provider: EmailProvider;
-  sinceCursor: string;
-  /** When the last successful sync finished — used to re-list mail if Gmail's history cursor has expired. */
+  /** When the last successful sync finished; null/undefined means "the whole lookback window". */
   sinceDate?: Date | null;
 }): Promise<{ newEmails: number; notificationsCreated: number }> {
-  const { userId, connectedAccountId, provider, sinceCursor, sinceDate } = params;
+  const { userId, connectedAccountId, provider, sinceDate } = params;
   const aiClient = getAIClient();
 
   await prisma.connectedAccount.update({
@@ -218,35 +231,72 @@ export async function processIncrementalSync(params: {
   });
 
   try {
-    const { emails, cursor } = await provider.syncIncremental(sinceCursor, sinceDate ?? undefined);
+    const floor = new Date(Date.now() - SYNC_LOOKBACK_DAYS * DAY_MS);
+    const since = new Date(Math.max(floor.getTime(), (sinceDate ?? floor).getTime() - DAY_MS));
+    const { messageIds } = await provider.listMessageIdsSince(since);
+
+    const processed = new Set(
+      (
+        await prisma.processedEmail.findMany({
+          where: { connectedAccountId, providerMessageId: { in: messageIds } },
+          select: { providerMessageId: true },
+        })
+      ).map((p) => p.providerMessageId)
+    );
+    const unprocessed = messageIds.filter((id) => !processed.has(id));
+    const batch = unprocessed.slice(0, MAX_NEW_EMAILS_PER_SYNC);
+    const leftover = unprocessed.length - batch.length;
 
     let notificationsCreated = 0;
+    let fetched = 0;
     let failures = 0;
-    for (const email of emails) {
-      try {
-        const result = await ingestEmail({ userId, connectedAccountId, email, aiClient });
-        if (result.notificationId) notificationsCreated += 1;
-      } catch (err) {
-        // One bad email must not block the rest, but we also must not advance
-        // the cursor past it — the next run retries (ingest is idempotent).
-        failures += 1;
-        console.error("[sync] ingest failed for one email:", err instanceof Error ? err.message : err);
+    let fetchError: unknown = null;
+
+    for (let i = 0; i < batch.length && !fetchError; i += FETCH_CONCURRENCY) {
+      const group = batch.slice(i, i + FETCH_CONCURRENCY);
+      const results = await Promise.allSettled(group.map((id) => provider.fetchEmailById(id)));
+
+      // Ingest one at a time: the resolver reads then writes shared Application rows.
+      for (const result of results) {
+        if (result.status === "rejected") {
+          fetchError ??= result.reason;
+          continue;
+        }
+        const email = result.value;
+        if (!email) continue;
+        fetched += 1;
+        try {
+          const outcome = await ingestEmail({ userId, connectedAccountId, email, aiClient });
+          if (outcome.notificationId) notificationsCreated += 1;
+        } catch (err) {
+          // One bad email must not block the rest; it stays unprocessed and is retried next run.
+          failures += 1;
+          console.error("[sync] ingest failed for one email:", err instanceof Error ? err.message : err);
+        }
       }
     }
 
-    if (failures > 0) {
+    if (fetchError) throw fetchError;
+
+    if (failures > 0 || leftover > 0) {
+      // Not fully caught up: leave lastSyncedAt where it is so the next run covers the rest.
       await prisma.connectedAccount.update({
         where: { id: connectedAccountId },
-        data: { lastSyncError: `${failures} email(s) could not be processed; will retry.` },
+        data: {
+          lastSyncError:
+            failures > 0
+              ? `${failures} email(s) could not be processed; will retry.`
+              : null,
+        },
       });
     } else {
       await prisma.connectedAccount.update({
         where: { id: connectedAccountId },
-        data: { historyId: cursor, lastSyncedAt: new Date(), lastSyncError: null },
+        data: { historyId: await provider.getCurrentCursor(), lastSyncedAt: new Date(), lastSyncError: null },
       });
     }
 
-    return { newEmails: emails.length, notificationsCreated };
+    return { newEmails: fetched, notificationsCreated };
   } catch (err) {
     await prisma.connectedAccount.update({
       where: { id: connectedAccountId },
@@ -258,7 +308,10 @@ export async function processIncrementalSync(params: {
 
 function describeSyncError(err: unknown): string {
   const message = err instanceof Error ? err.message : "Sync failed";
-  if (/invalid_grant|invalid_token|unauthorized|401/i.test(message)) {
+  if (/quota|rate.?limit|too many requests/i.test(message)) {
+    return "Gmail is temporarily rate-limiting requests — Applyd will retry automatically.";
+  }
+  if (/invalid_grant|invalid_token|unauthorized|401/i.test(message)) {
     return "Gmail access expired or was revoked — reconnect your account in Settings.";
   }
   return message.slice(0, 200);

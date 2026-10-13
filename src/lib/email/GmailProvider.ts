@@ -2,7 +2,7 @@ import "server-only";
 import { google, gmail_v1 } from "googleapis";
 import type { EmailProvider } from "./EmailProvider";
 import type { RawEmail } from "@/types/pipeline";
-import { ATS_DOMAINS, domainMatches } from "@/lib/jobDomains";
+import { ATS_DOMAINS } from "@/lib/jobDomains";
 
 /**
  * Deterministic pre-filter applied at the Gmail search-query level so we never
@@ -76,17 +76,17 @@ export class GmailProvider implements EmailProvider {
   }
 
   async listHistoricalMessageIds(): Promise<{ messageIds: string[] }> {
-    const query = buildSearchQuery();
+    return this.listMessageIds(buildSearchQuery());
+  }
+
+  private async listMessageIds(query: string): Promise<{ messageIds: string[] }> {
     let pageToken: string | undefined;
     const collectedIds: string[] = [];
 
     do {
-      const list = await this.gmail.users.messages.list({
-        userId: "me",
-        q: query,
-        maxResults: 100,
-        pageToken,
-      });
+      const list = await withBackoff(() =>
+        this.gmail.users.messages.list({ userId: "me", q: query, maxResults: 100, pageToken })
+      );
       const ids = (list.data.messages ?? []).map((m) => m.id!).filter(Boolean);
       collectedIds.push(...ids);
       pageToken = list.data.nextPageToken ?? undefined;
@@ -104,91 +104,16 @@ export class GmailProvider implements EmailProvider {
     return this.fetchEmail(id);
   }
 
-  /** Re-lists recent relevant mail by date (no history cursor needed) and fetches it. */
-  private async listAndFetchSince(since: Date): Promise<RawEmail[]> {
-    const ids: string[] = [];
-    let pageToken: string | undefined;
-    do {
-      const list = await this.gmail.users.messages.list({
-        userId: "me",
-        q: buildSearchQuery(since),
-        maxResults: 100,
-        pageToken,
-      });
-      ids.push(...(list.data.messages ?? []).map((m) => m.id!).filter(Boolean));
-      pageToken = list.data.nextPageToken ?? undefined;
-    } while (pageToken && ids.length < MAX_HISTORICAL_MESSAGES);
-
-    const emails: RawEmail[] = [];
-    for (let i = 0; i < ids.length; i += 10) {
-      const batch = await Promise.all(ids.slice(i, i + 10).map((id) => this.fetchEmail(id)));
-      emails.push(...batch.filter((e): e is RawEmail => e !== null));
-    }
-    return emails;
-  }
-
-  async syncIncremental(
-    sinceCursor: string,
-    sinceDate?: Date
-  ): Promise<{ emails: RawEmail[]; cursor: string }> {
-    if (!sinceCursor) {
-      const profile = await this.gmail.users.getProfile({ userId: "me" });
-      return { emails: [], cursor: String(profile.data.historyId ?? "") };
-    }
-
-    const addedMessageIds = new Set<string>();
-    let pageToken: string | undefined;
-    let latestHistoryId = sinceCursor;
-
-    try {
-      do {
-        const history = await this.gmail.users.history.list({
-          userId: "me",
-          startHistoryId: sinceCursor,
-          historyTypes: ["messageAdded"],
-          pageToken,
-        });
-        for (const record of history.data.history ?? []) {
-          for (const added of record.messagesAdded ?? []) {
-            if (added.message?.id) addedMessageIds.add(added.message.id);
-          }
-        }
-        if (history.data.historyId) latestHistoryId = history.data.historyId;
-        pageToken = history.data.nextPageToken ?? undefined;
-      } while (pageToken);
-    } catch {
-      // Gmail only keeps history for roughly a week; a 404 means the cursor has
-      // expired. Returning "nothing new" here (as this once did) silently drops
-      // every email that arrived during the gap while still advancing the
-      // cursor. Instead re-list mail since the last successful sync (a day of
-      // overlap — already-processed messages are deduplicated downstream).
-      const profile = await this.gmail.users.getProfile({ userId: "me" });
-      const from = new Date((sinceDate ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)).getTime() - 24 * 60 * 60 * 1000);
-      const emails = await this.listAndFetchSince(from);
-      return { emails, cursor: String(profile.data.historyId ?? sinceCursor) };
-    }
-
-    const emails: RawEmail[] = [];
-    for (const id of addedMessageIds) {
-      const email = await this.fetchEmail(id);
-      if (email) emails.push(email);
-    }
-
-    // Apply the same domain/subject relevance pre-filter used in historical scan,
-    // since history.list (unlike messages.list) has no server-side query support.
-    const filtered = emails.filter((e) => matchesRelevancePrefilter(e));
-
-    return { emails: filtered, cursor: latestHistoryId };
+  async listMessageIdsSince(since: Date): Promise<{ messageIds: string[] }> {
+    return this.listMessageIds(buildSearchQuery(since));
   }
 
   private async fetchEmail(messageId: string): Promise<RawEmail | null> {
     let res;
     try {
-      res = await this.gmail.users.messages.get({
-        userId: "me",
-        id: messageId,
-        format: "full",
-      });
+      res = await withBackoff(() =>
+        this.gmail.users.messages.get({ userId: "me", id: messageId, format: "full" })
+      );
     } catch (err) {
       // A message that was listed but has since been deleted (or moved out of
       // reach) is not a sync failure — skip it, as the EmailProvider contract says.
@@ -219,12 +144,6 @@ export class GmailProvider implements EmailProvider {
       receivedAt: msg.internalDate ? new Date(Number(msg.internalDate)) : new Date(),
     };
   }
-}
-
-function matchesRelevancePrefilter(email: RawEmail): boolean {
-  if (domainMatches(email.fromDomain, JOB_SENDER_DOMAINS)) return true;
-  const subjectLower = email.subject.toLowerCase();
-  return SUBJECT_KEYWORDS.some((k) => subjectLower.includes(k));
 }
 
 function extractPlainTextBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
@@ -265,4 +184,29 @@ function stripHtml(html: string): string {
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function httpStatus(err: unknown): number | undefined {
+  const e = err as { code?: unknown; status?: unknown };
+  const n = Number(e.code ?? e.status);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Gmail enforces per-user, per-minute quota units. A 429 (or a 403 that names a
+ * rate limit) is transient, so retry a few times with growing delays instead of
+ * failing the whole sync.
+ */
+async function withBackoff<T>(call: () => Promise<T>, attempts = 4): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (err) {
+      const status = httpStatus(err);
+      const message = err instanceof Error ? err.message : "";
+      const retryable = status === 429 || (status === 403 && /rate|quota/i.test(message));
+      if (!retryable || attempt >= attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    }
+  }
 }

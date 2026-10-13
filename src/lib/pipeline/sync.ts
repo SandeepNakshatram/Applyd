@@ -46,7 +46,6 @@ export async function syncAccount(
       userId: account.userId,
       connectedAccountId: account.id,
       provider,
-      sinceCursor: account.historyId ?? "",
       sinceDate: account.lastSyncedAt,
     });
     return { status: "synced", ...result };

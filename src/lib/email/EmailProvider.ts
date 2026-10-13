@@ -21,12 +21,10 @@ export interface EmailProvider {
   getCurrentCursor(): Promise<string>;
 
   /**
-   * Incremental sync since the last known cursor. Returns new emails plus the
-   * updated cursor. Must be safe to call repeatedly (idempotent) — the caller
-   * still deduplicates by providerMessageId.
+   * Ids of relevant mail received since `since` (day granularity, newest
+   * first), without downloading any bodies. Incremental sync uses this instead
+   * of a provider history cursor: it can't expire, and the caller skips ids it
+   * has already processed before fetching anything.
    */
-  syncIncremental(sinceCursor: string, sinceDate?: Date): Promise<{
-    emails: RawEmail[];
-    cursor: string;
-  }>;
+  listMessageIdsSince(since: Date): Promise<{ messageIds: string[] }>;
 }

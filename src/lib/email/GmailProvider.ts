@@ -182,11 +182,20 @@ export class GmailProvider implements EmailProvider {
   }
 
   private async fetchEmail(messageId: string): Promise<RawEmail | null> {
-    const res = await this.gmail.users.messages.get({
-      userId: "me",
-      id: messageId,
-      format: "full",
-    });
+    let res;
+    try {
+      res = await this.gmail.users.messages.get({
+        userId: "me",
+        id: messageId,
+        format: "full",
+      });
+    } catch (err) {
+      // A message that was listed but has since been deleted (or moved out of
+      // reach) is not a sync failure — skip it, as the EmailProvider contract says.
+      const status = (err as { code?: number; status?: number }).code ?? (err as { status?: number }).status;
+      if (status === 404) return null;
+      throw err;
+    }
     const msg = res.data;
     if (!msg) return null;
 

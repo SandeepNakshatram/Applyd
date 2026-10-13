@@ -84,7 +84,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
         await prisma.connectedAccount.update({
           where: { id: existing.id },
-          data: { accessTokenReference, refreshTokenReference, status: "ACTIVE", disconnectedAt: null },
+          data: {
+            accessTokenReference,
+            refreshTokenReference,
+            status: "ACTIVE",
+            disconnectedAt: null,
+            // Fresh access: forget the old failure and let the next sync run immediately.
+            lastSyncError: null,
+            lastSyncAttemptAt: null,
+          },
         });
       } else {
         const { accessTokenReference, refreshTokenReference } = await storeTokens({

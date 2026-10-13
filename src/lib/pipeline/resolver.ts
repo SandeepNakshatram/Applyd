@@ -1,6 +1,6 @@
 import "server-only";
 import { addDays } from "date-fns";
-import type { Application, EmailEventType, Prisma } from "@/generated/prisma";
+import type { Application, ApplicationStatus, EmailEventType, Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import type { ExtractionResult, PipelineIngestResult, RawEmail } from "@/types/pipeline";
 import { UNKNOWN_COMPANY, UNKNOWN_ROLE } from "@/lib/placeholders";
@@ -135,6 +135,22 @@ async function findMatchingApplication(
   return openAtCompany.length === 1 ? openAtCompany[0] : null;
 }
 
+const STAGE_RANK: Partial<Record<ApplicationStatus, number>> = {
+  APPLIED: 0,
+  SCREENING: 1,
+  ASSESSMENT: 2,
+  INTERVIEW: 3,
+  OFFER: 4,
+};
+
+/** True when `incoming` is a strictly earlier pipeline stage than `current` (terminal states don't rank). */
+function isEarlierStage(incoming: ApplicationStatus | null | undefined, current: ApplicationStatus): boolean {
+  if (!incoming) return false;
+  const a = STAGE_RANK[incoming];
+  const b = STAGE_RANK[current];
+  return a !== undefined && b !== undefined && a < b;
+}
+
 export async function resolveApplication(params: {
   userId: string;
   /** The mailbox the email came from; scopes event de-duplication. */
@@ -188,6 +204,15 @@ export async function resolveApplication(params: {
       select: { timestamp: true },
     });
     const isNewest = !latest || email.receivedAt.getTime() >= latest.timestamp.getTime();
+    // A generic reminder ("your application is incomplete") or a repeat
+    // confirmation must never move an application backwards from, say,
+    // Interview to Applied. It still goes on the timeline; it just doesn't
+    // change the status, next action or notify.
+    const regresses =
+      (extraction.eventType === "APPLICATION_CONFIRMATION" || extraction.eventType === "APPLICATION_STATUS_UPDATE") &&
+      // (neither carries a stage of its own beyond "applied", so a missing status counts as Applied)
+      isEarlierStage(extraction.status ?? "APPLIED", existing.currentStatus);
+    const applyLatest = isNewest && !regresses;
 
     const event = await prisma.applicationEvent.create({
       data: {
@@ -230,7 +255,7 @@ export async function resolveApplication(params: {
       where: { id: existing.id },
       data: {
         ...appliedUpdate,
-        ...(isNewest
+        ...(applyLatest
           ? {
               currentStatus: extraction.status ?? existing.currentStatus,
               nextAction: nextAction.nextAction,
@@ -249,7 +274,7 @@ export async function resolveApplication(params: {
 
     // Telling the user "moved to Screening" about a step that's already behind
     // them would be noise; only the newest development notifies.
-    const notificationId = isNewest
+    const notificationId = applyLatest
       ? await send(() =>
           enteringReview
             ? notifyReviewNeeded(userId, updated)
@@ -258,7 +283,7 @@ export async function resolveApplication(params: {
       : undefined;
 
     return {
-      outcome: isNewest ? "EVENT_ADDED_WITH_NOTIFICATION" : "EVENT_ADDED_NO_NOTIFICATION",
+      outcome: applyLatest ? "EVENT_ADDED_WITH_NOTIFICATION" : "EVENT_ADDED_NO_NOTIFICATION",
       applicationId: existing.id,
       eventId: event.id,
       notificationId,
